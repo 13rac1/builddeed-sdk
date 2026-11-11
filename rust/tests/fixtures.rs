@@ -79,6 +79,11 @@ fn device_license_replies() {
                 Ok(Status::Registered(s)) => {
                     assert_eq!(s.account_id, c["account_id"].as_str().unwrap(), "{name}");
                     assert_eq!(s.token_id, c["token_id"].as_str().unwrap(), "{name}");
+                    assert_eq!(
+                        s.updates_until_ms,
+                        c["updates_until_ms"].as_u64().unwrap(),
+                        "{name}"
+                    );
                 }
                 other => panic!("{name}: {other:?}"),
             },

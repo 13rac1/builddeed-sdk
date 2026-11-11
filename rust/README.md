@@ -44,7 +44,7 @@ website.
 | `find_artifact(sha256)` | The official build record of a file. |
 | `verify_self()` | The record of the running program; `None` for a self-built copy. |
 | `latest_build(platform)`, `download_latest(platform, dir)` | The last recorded official file for a platform. The download goes to a temporary name and gets its name only when its SHA-256 is the recorded one. |
-| `KeyFile::load(path)`, `buy_with_key(key)`, `register_with_key(key, token)`, `budget(account)`, `licenses_of(account)` | Buy and register with an agent key and the owner's agent budget, with no browser. `buy_with_key` sends nothing when the account owns a license already. A key that is not an agent key for the contract is refused. |
+| `KeyFile::load(path)`, `buy_with_key(key)`, `register_with_key(key, token)`, `budget(account)`, `licenses_of(account)` | Buy and register with an agent key and the owner's agent budget, with no browser. `buy_with_key` sends nothing when the account owns a license of the product whose update period has not ended. A key that is not an agent key for the contract is refused. |
 
 ### Command line, for agents and CI
 

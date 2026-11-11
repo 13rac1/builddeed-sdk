@@ -24,7 +24,7 @@ use std::process::ExitCode;
 const USAGE: &str = "usage: builddeed --product <key> [--contract <account>] [--rpc <url>] <command>
 commands:
   budget --key <file>                  the owner's agent budget and licenses of the product
-  buy --key <file>                     buy a license from the budget (nothing is sent if one is owned)
+  buy --key <file>                     buy a license from the budget (nothing is sent if a current one is owned)
   register --key <file> [--token <id>] give THIS computer a seat (not a container or sandbox)
   download [--platform <p>] [--out <dir>]  the official file, SHA-256 checked
   status [--version <v>]               the seat of this computer

@@ -1,0 +1,19 @@
+{
+  "comment": "RPC URLs that an SDK must accept or refuse: https only, or plain http to a loopback host compared as a parsed host name, not as a prefix.",
+  "accept": [
+    "https://rpc.testnet.fastnear.com",
+    "https://rpc.testnet.fastnear.com/",
+    "http://127.0.0.1:3030",
+    "http://localhost:3030",
+    "http://[::1]:3030"
+  ],
+  "refuse": [
+    "http://rpc.testnet.fastnear.com",
+    "http://127.0.0.1.evil.example",
+    "http://localhost.evil.example:3030",
+    "http://127.0.0.1@evil.example",
+    "ftp://rpc.testnet.fastnear.com",
+    "rpc.testnet.fastnear.com",
+    ""
+  ]
+}

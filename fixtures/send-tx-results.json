@@ -1,0 +1,134 @@
+{
+  "comment": "Replies to send_tx and how an SDK must classify them. ok: the transaction ran and returned a value. refused: it surely did not change anything (the node refused it, or the contract panicked, which reverts it). unconfirmed: it may have run; report the transaction hash and do not send it again before the result is checked. A lost connection after the send is also unconfirmed. A body that is a string is sent as raw text.",
+  "cases": [
+    {
+      "name": "success",
+      "status": 200,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "result": {
+          "status": {
+            "SuccessValue": "eyJ0b2tlbl9pZCI6ImNoZWNrc3VtOjEifQ=="
+          }
+        }
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "contract_panic",
+      "status": 200,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "result": {
+          "status": {
+            "Failure": {
+              "ActionError": {
+                "index": 0,
+                "kind": {
+                  "FunctionCallError": {
+                    "ExecutionError": "Smart contract panicked: The agent budget is too low"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": "refused"
+    },
+    {
+      "name": "invalid_transaction",
+      "status": 200,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "error": {
+          "name": "HANDLER_ERROR",
+          "code": -32000,
+          "message": "Server error",
+          "cause": {
+            "name": "INVALID_TRANSACTION",
+            "info": {}
+          }
+        }
+      },
+      "expect": "refused"
+    },
+    {
+      "name": "parse_error",
+      "status": 200,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "error": {
+          "name": "REQUEST_VALIDATION_ERROR",
+          "code": -32000,
+          "message": "Server error",
+          "cause": {
+            "name": "PARSE_ERROR",
+            "info": {}
+          }
+        }
+      },
+      "expect": "refused"
+    },
+    {
+      "name": "timeout",
+      "status": 408,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "error": {
+          "name": "HANDLER_ERROR",
+          "code": -32000,
+          "message": "Server error",
+          "cause": {
+            "name": "TIMEOUT_ERROR",
+            "info": {}
+          }
+        }
+      },
+      "expect": "unconfirmed"
+    },
+    {
+      "name": "internal_error",
+      "status": 500,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "error": {
+          "name": "INTERNAL_ERROR",
+          "code": -32000,
+          "message": "Server error",
+          "cause": {
+            "name": "INTERNAL_ERROR",
+            "info": {}
+          }
+        }
+      },
+      "expect": "unconfirmed"
+    },
+    {
+      "name": "no_cause",
+      "status": 500,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": "x",
+        "error": {
+          "name": "HANDLER_ERROR",
+          "code": -32000,
+          "message": "Server error"
+        }
+      },
+      "expect": "unconfirmed"
+    },
+    {
+      "name": "not_json",
+      "status": 502,
+      "body": "<html>Bad Gateway</html>",
+      "expect": "unconfirmed"
+    }
+  ]
+}

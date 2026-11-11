@@ -71,26 +71,60 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
 
 /// Sends one JSON-RPC request and returns its classified result.
 pub(crate) fn post(rpc_url: &str, body: Value) -> Result<Value, Error> {
-    // HTTPS only, so that nobody on the network path can answer for the
-    // contract. Loopback is allowed for tests and local nodes.
-    let loopback = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
-        .iter()
-        .any(|p| rpc_url.starts_with(p));
-    if !rpc_url.starts_with("https://") && !loopback {
-        return Err(Error::Rpc(format!("the RPC URL must use https: {rpc_url}")));
+    let (_, text) = post_raw(rpc_url, &body)?;
+    let resp: Value = serde_json::from_str(&text)
+        .map_err(|e| Error::Rpc(format!("the reply is not JSON: {e}")))?;
+    classify(&resp)
+}
+
+/// Sends one JSON-RPC request and returns the HTTP status and the body as
+/// text. nearcore answers some errors with an HTTP error status and a JSON
+/// body, so an error status is not an error here.
+pub(crate) fn post_raw(rpc_url: &str, body: &Value) -> Result<(u16, String), Error> {
+    if !url_allowed(rpc_url) {
+        return Err(Error::Rpc(format!(
+            "the RPC URL must use https (or http to a loopback host): {rpc_url}"
+        )));
     }
-    let resp: Value = match ureq::post(rpc_url)
+    let resp = match ureq::post(rpc_url)
         .timeout(Duration::from_secs(30))
         .send_json(body)
     {
-        Ok(r) => r.into_json(),
-        // nearcore answers some query errors with an HTTP error status and a
-        // JSON body.
-        Err(ureq::Error::Status(_, r)) => r.into_json(),
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
         Err(e) => return Err(Error::Network(e.to_string())),
+    };
+    let status = resp.status();
+    let text = resp
+        .into_string()
+        .map_err(|e| Error::Network(e.to_string()))?;
+    Ok((status, text))
+}
+
+/// HTTPS only, so that nobody on the network path can answer for the
+/// contract. Plain http is allowed only to a loopback host (tests, local
+/// nodes), compared as the parsed host name: `http://127.0.0.1.evil.example`
+/// is not loopback.
+pub(crate) fn url_allowed(url: &str) -> bool {
+    if let Some(rest) = url.strip_prefix("https://") {
+        return !rest.is_empty();
     }
-    .map_err(|e| Error::Rpc(format!("the reply is not JSON: {e}")))?;
-    classify(&resp)
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(v6) = authority.strip_prefix('[') {
+        match v6.split_once(']') {
+            Some((h, port)) if port.is_empty() || port.starts_with(':') => h,
+            _ => return false,
+        }
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
 pub(crate) fn device_license(
@@ -125,6 +159,17 @@ pub(crate) fn find_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rpc_url_vectors() {
+        let f: Value = serde_json::from_str(include_str!("../../fixtures/rpc-urls.json")).unwrap();
+        for u in f["accept"].as_array().unwrap() {
+            assert!(url_allowed(u.as_str().unwrap()), "{u}");
+        }
+        for u in f["refuse"].as_array().unwrap() {
+            assert!(!url_allowed(u.as_str().unwrap()), "{u}");
+        }
+    }
     use crate::fake_rpc;
 
     #[test]

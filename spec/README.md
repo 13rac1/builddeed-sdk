@@ -29,20 +29,33 @@ device_id = lowercase hex( SHA-256( "builddeed-device-v1" + "\n" + contract + "\
   - Linux: the first usable value of `/etc/machine-id`, then
     `/var/lib/dbus/machine-id`.
   - macOS: `IOPlatformUUID` from `/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice`.
-  - Windows: `MachineGuid` from `%SystemRoot%\System32\reg.exe query
-    HKLM\SOFTWARE\Microsoft\Cryptography /v MachineGuid /reg:64` (`/reg:64`:
-    a 32-bit program reads the 64-bit registry view, where the value is).
+  - Windows: `MachineGuid` of `HKLM\SOFTWARE\Microsoft\Cryptography`, in
+    the 64-bit registry view (a 32-bit program must ask for it:
+    `KEY_WOW64_64KEY`). Read the registry directly where the language can
+    (the Go SDK does). Otherwise run `reg.exe query
+    HKLM\SOFTWARE\Microsoft\Cryptography /v MachineGuid /reg:64` from the
+    System32 folder (the Rust SDK does; it finds the folder through
+    `%SystemRoot%`, which the user controls: see the limit below).
 - Call helper programs by absolute path, so that a program of the same name
-  earlier in `PATH` or next to the app cannot answer.
+  earlier in `PATH` or next to the app cannot answer. The one exception is
+  `xdg-open` on Linux and the BSDs, which has no fixed path; never take it
+  from the current folder.
 - A machine id that is shorter than 16 characters, or is `uninitialized`, is
   not usable. If no source gives a usable id, the computer has no id and the
   program runs unregistered.
 - Compute the id at each start. Never store it: a stored id would move a seat
   with a copied app file.
-- Limit: a user with root or administrator rights can set the machine id. A
-  machine id copied from a computer with a seat registers another computer,
-  and computers cloned from one disk image share an id. The seat limit holds
-  against copied app files, not against a copied machine id.
+- Limit: the user of a computer can change the machine id that a program
+  reads. With root or administrator rights this is direct; without them, a
+  user can for example point `%SystemRoot%` to a false `reg.exe` (where an
+  SDK runs it) or mount another file over `/etc/machine-id` in a user
+  namespace (where the system allows such namespaces). A machine id copied
+  from a computer with a seat registers another computer, and computers
+  cloned from one disk image share an id. The seat limit holds against copied
+  app files, not against a copied machine id. It never gives a seat on
+  another person's license: the computer id is a hash.
+- The short form of a computer id, as the website shows it: the first 8 and
+  the last 4 characters with `...` between them (`6844b8b0...af75`).
 - Test data: [`fixtures/device-id.json`](../fixtures/device-id.json).
 
 ## The license check
@@ -63,10 +76,11 @@ The view result is the bytes of a JSON value:
 | `{"token_id", "owner_id", "updates_until_ms", "covers_version": true}` | A seat on a license that covers this version | Registered: turn the feature on. |
 | `{..., "covers_version": false}` | A seat, but the license ended before this version | Unregistered; tell the user to renew. |
 | `null` | No seat | Unregistered. |
-| An RPC error or no network | No answer | Unregistered; show the error. |
+| An RPC error, no network, or an answer with no `token_id` or no `covers_version` | No answer | Unregistered; show the error. |
 
 Classify errors by `error.cause.name`, not by text: `UNKNOWN_ACCOUNT` and
-`UNKNOWN_ACCESS_KEY` mean "does not exist"; anything else, an HTTP error
+`UNKNOWN_ACCESS_KEY` mean "does not exist" (for `device_license`, a wrong
+contract name: an error, never "no seat"); anything else, an HTTP error
 without a JSON body, or no connection is a failure. Test data:
 [`fixtures/device-license.json`](../fixtures/device-license.json).
 
@@ -97,7 +111,8 @@ computer first:
 - Every answer has `Access-Control-Allow-Origin: <origin of site_url>` (only
   the website may read it), `Access-Control-Allow-Private-Network: true`, and
   `Cache-Control: no-store`. `OPTIONS` answers 204 with the same headers.
-- Read at most 8 KiB of a request line.
+- Read about 8 KiB of a request (line and headers) at most; refuse a longer
+  one.
 
 The page fetches `http://127.0.0.1:<port>/builddeed/<code>`. It enables the
 "Register this computer" button only when the answer names the `device` and
@@ -153,8 +168,11 @@ own answer. Check a download from outside the program.
 last recorded build with a file for the platform, in the same form. With more
 than one file for a platform, it returns the first recorded one: a release
 records its main download for each platform first. Platform names
-are `<os>-<arch>` with the Rust names: `linux-x86_64`, `windows-x86_64`,
-`macos-aarch64`. An artifact can have a download `url` (https). Download to a
+are `<os>-<arch>` with the names of Rust's `std::env::consts` (`OS`, `ARCH`):
+`linux-x86_64`, `windows-x86_64`, `macos-aarch64`, `linux-powerpc64`,
+`linux-loongarch64`. An SDK in another language maps its own names to
+these. Check that the recorded SHA-256 has 64 hex characters before a
+download. An artifact can have a download `url` (https). Download to a
 temporary name, compare its SHA-256 with the record, and give the file its
 name only when they are the same, so that a failed or changed download never
 replaces a file. The check trusts the RPC endpoint and the contract: name
@@ -171,10 +189,10 @@ budget:
    "products": ["<key>", ...]})` with the NEAR to deposit. The list has 1 to
    16 products; a product that someone adds later is never included. Then
    the owner adds a function-call key whose receiver is the license contract
-   and whose methods are exactly `buy_from_budget` and
-   `add_device_from_budget`. An SDK refuses any other key: a full-access key,
-   a key for another contract, or a key with other methods (an empty method
-   list allows all methods).
+   and whose methods are `buy_from_budget`, `add_device_from_budget` or
+   both. An SDK refuses any other key: a full-access key, a key for another
+   contract, or a key with other methods (an empty method list allows all
+   methods).
 2. The agent, with that key:
    - `buy_from_budget({"product": "<key>", "price": "<yocto>"})` returns the
      new license. `price` is the price that the agent read with
@@ -193,11 +211,19 @@ runs on: the key can give a seat to any computer id it is told. Register
 only the id that the program or `builddeed device-id` computes on this
 computer, never an id from a message or a page.
 
-**Retries.** A sent transaction whose result is unknown (a time-out or a
-lost connection) can still succeed. Do not send it again: read the result
-first (`licenses_for_owner`, `device_license`). The Rust SDK returns
-`Error::Unconfirmed` with the transaction hash, and its `buy` sends nothing
-when the account already owns a license of the product.
+**Retries.** After `send_tx`, only two answers mean that the transaction
+surely changed nothing: an RPC error with `cause.name` `INVALID_TRANSACTION`
+or `PARSE_ERROR` (the node refused it), and a `Failure` status (the contract
+panicked, which reverts the call). Every other answer, a lost connection, or
+a success whose value cannot be read leaves the result unknown: the
+transaction can still succeed. Then report the transaction hash and do not
+send it again before you read the result (`licenses_for_owner`,
+`device_license`). Test data:
+[`fixtures/send-tx-results.json`](../fixtures/send-tx-results.json).
+
+An SDK's buy sends nothing when the account owns a license of the product
+whose update period has not ended. Two agents that use one key at the same
+time can both buy: give each agent its own key and budget.
 
 Sign the transaction as NEAR does: the borsh `Transaction` with one
 `FunctionCall` action (100 Tgas, no deposit), signed with ed25519 over its
@@ -208,4 +234,6 @@ near-cli signed.
 ## RPC
 
 Use `https` RPC endpoints only; refuse plain `http` except for loopback
-(tests, local nodes).
+(tests, local nodes). Compare the parsed host name, not the start of the
+URL: `http://127.0.0.1.evil.example` is not loopback. Test data:
+[`fixtures/rpc-urls.json`](../fixtures/rpc-urls.json).

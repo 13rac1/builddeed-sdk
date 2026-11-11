@@ -487,6 +487,10 @@ impl Client {
         let m = self
             .latest_build(platform)?
             .ok_or_else(|| Error::Io(format!("no official build for {platform}")))?;
+        let sha = &m.artifact.sha256;
+        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::Rpc("the record has no valid SHA-256".into()));
+        }
         let url = m
             .artifact
             .url

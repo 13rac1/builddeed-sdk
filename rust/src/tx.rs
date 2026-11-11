@@ -273,34 +273,54 @@ pub(crate) fn call(
     )?;
     let tx_hash = bs58::encode(Sha256::digest(&tx)).into_string();
     let signed = sign(&tx, &key.signing);
-    let sent = rpc::post(
-        rpc_url,
-        json!({"jsonrpc": "2.0", "id": "builddeed", "method": "send_tx", "params": {
-            "signed_tx_base64": B64.encode(&signed), "wait_until": "FINAL"}}),
-    );
-    match sent {
-        Ok(result) => outcome(&result),
+    let body = json!({"jsonrpc": "2.0", "id": "builddeed", "method": "send_tx", "params": {
+        "signed_tx_base64": B64.encode(&signed), "wait_until": "FINAL"}});
+    match rpc::post_raw(rpc_url, &body) {
+        Ok((_, text)) => send_result(&text, &tx_hash),
+        // The request may have reached the node: the result is unknown.
         Err(Error::Network(_)) => Err(Error::Unconfirmed { tx_hash }),
-        Err(Error::Rpc(m)) if m.contains("TIMEOUT_ERROR") => Err(Error::Unconfirmed { tx_hash }),
         Err(e) => Err(e),
     }
 }
 
-/// The return value of a final transaction, or its failure as an error.
-fn outcome(result: &Value) -> Result<Value, Error> {
-    let status = &result["status"];
+/// The `cause.name` of the send_tx errors that surely changed nothing: the
+/// node refused the transaction. Every other error leaves the result unknown.
+const REFUSED_CAUSES: [&str; 2] = ["INVALID_TRANSACTION", "PARSE_ERROR"];
+
+/// Classifies the reply to send_tx (`fixtures/send-tx-results.json`): the
+/// return value, a sure refusal as [`Error::Rpc`], or an unknown result as
+/// [`Error::Unconfirmed`].
+fn send_result(text: &str, tx_hash: &str) -> Result<Value, Error> {
+    let unknown = || Error::Unconfirmed {
+        tx_hash: tx_hash.to_string(),
+    };
+    let Ok(resp) = serde_json::from_str::<Value>(text) else {
+        return Err(unknown());
+    };
+    if let Some(err) = resp.get("error") {
+        let cause = err.pointer("/cause/name").and_then(Value::as_str);
+        return Err(match cause {
+            Some(c) if REFUSED_CAUSES.contains(&c) => {
+                Error::Rpc(format!("the node refused the transaction: {err}"))
+            }
+            _ => unknown(),
+        });
+    }
+    let status = &resp["result"]["status"];
     if let Some(v) = status.get("SuccessValue").and_then(Value::as_str) {
         if v.is_empty() {
             return Ok(Value::Null);
         }
-        let bytes = B64
+        // The transaction ran: a value that cannot be read is still a result
+        // to check, not a refusal.
+        return B64
             .decode(v)
-            .map_err(|e| Error::Rpc(format!("bad return value: {e}")))?;
-        return serde_json::from_slice(&bytes)
-            .map_err(|e| Error::Rpc(format!("bad return value: {e}")));
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .ok_or_else(unknown);
     }
     if let Some(f) = status.get("Failure") {
-        // The contract's panic message, when there is one.
+        // A panic reverts the call. The contract's message, when there is one.
         let msg = f
             .pointer("/ActionError/kind/FunctionCallError/ExecutionError")
             .and_then(Value::as_str)
@@ -308,9 +328,7 @@ fn outcome(result: &Value) -> Result<Value, Error> {
             .unwrap_or_else(|| f.to_string());
         return Err(Error::Rpc(format!("the contract refused the call: {msg}")));
     }
-    Err(Error::Rpc(format!(
-        "unexpected transaction result: {status}"
-    )))
+    Err(unknown())
 }
 
 #[cfg(test)]
@@ -459,16 +477,32 @@ mod tests {
     }
 
     #[test]
-    fn outcome_returns_the_value_or_the_contract_error() {
-        let ok = json!({"status": {"SuccessValue": B64.encode(br#"{"token_id":"doom:1"}"#)}});
-        assert_eq!(outcome(&ok).unwrap()["token_id"], "doom:1");
-        assert_eq!(
-            outcome(&json!({"status": {"SuccessValue": ""}})).unwrap(),
-            Value::Null
-        );
-        let fail = json!({"status": {"Failure": {"ActionError": {"index": 0, "kind": {
-            "FunctionCallError": {"ExecutionError": "Smart contract panicked: The agent budget is too low"}}}}}});
-        let e = outcome(&fail).unwrap_err();
+    fn send_result_vectors() {
+        let f: Value =
+            serde_json::from_str(include_str!("../../fixtures/send-tx-results.json")).unwrap();
+        for c in f["cases"].as_array().unwrap() {
+            let text = match &c["body"] {
+                Value::String(raw) => raw.clone(),
+                v => v.to_string(),
+            };
+            let got = send_result(&text, "H");
+            let name = c["name"].as_str().unwrap();
+            match c["expect"].as_str().unwrap() {
+                "ok" => assert_eq!(got.unwrap()["token_id"], "checksum:1", "{name}"),
+                "refused" => assert!(matches!(got, Err(Error::Rpc(_))), "{name}: {got:?}"),
+                "unconfirmed" => assert_eq!(
+                    got,
+                    Err(Error::Unconfirmed {
+                        tx_hash: "H".into()
+                    }),
+                    "{name}"
+                ),
+                e => panic!("unknown expect {e}"),
+            }
+        }
+        let panic = json!({"result": {"status": {"Failure": {"ActionError": {"index": 0, "kind": {
+            "FunctionCallError": {"ExecutionError": "Smart contract panicked: The agent budget is too low"}}}}}}});
+        let e = send_result(&panic.to_string(), "H").unwrap_err();
         assert!(e.to_string().contains("budget is too low"), "{e}");
     }
 }
