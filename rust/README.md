@@ -95,7 +95,7 @@ programs with no browser" in the [spec](../spec/README.md).
 ## Used by
 
 - [BuildDeed Checksum](https://github.com/13rac1/builddeed/tree/main/app) (egui)
-- [Iron Doom](https://github.com/ai-13rac1/iron-doom) (Bevy)
+- [Room4Doom](https://github.com/ai-13rac1/room4doom) (`Client` directly, no Bevy)
 
 ## Test
 
