@@ -441,6 +441,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bevy",
+ "getrandom 0.2.17",
  "hex",
  "serde",
  "serde_json",

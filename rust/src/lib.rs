@@ -34,9 +34,11 @@
 
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod device;
+mod presence;
 mod rpc;
 
 #[cfg(feature = "bevy")]
@@ -243,7 +245,10 @@ impl Client {
     /// shows them.
     pub fn short_device_id(&self) -> Result<String, Error> {
         let d = self.device_id()?;
-        Ok(format!("{}...{}", &d[..8], &d[d.len() - 4..]))
+        Ok(match (d.get(..8), d.get(d.len().saturating_sub(4)..)) {
+            (Some(a), Some(b)) if d.len() > 12 => format!("{a}...{b}"),
+            _ => d.to_string(),
+        })
     }
 
     /// The seat of this computer on a license that covers this version, or
@@ -277,14 +282,17 @@ impl Client {
     }
 
     /// The website page that registers this computer.
+    ///
+    /// [`Client::open_register_page`] adds the presence check (`port` and
+    /// `code`) to this URL.
     pub fn register_url(&self) -> Result<String, Error> {
         let p = &self.product;
         Ok(format!(
             "{}/register.html#product={}&device={}&version={}",
             p.site_url,
-            p.key,
-            self.device_id()?,
-            p.version
+            encode(&p.key),
+            encode(self.device_id()?),
+            encode(&p.version)
         ))
     }
 
@@ -292,13 +300,34 @@ impl Client {
     pub fn buy_url(&self) -> String {
         format!(
             "{}/buy.html?product={}",
-            self.product.site_url, self.product.key
+            self.product.site_url,
+            encode(&self.product.key)
         )
     }
 
     /// Opens the register page in the default browser.
+    ///
+    /// The presence check: for [`REGISTER_WAIT`], the program answers a
+    /// one-time code on 127.0.0.1, and the page asks the owner's wallet only
+    /// when that answer names this computer. So a register link sent from
+    /// another computer cannot give a seat to that computer. See
+    /// `spec/README.md`.
     pub fn open_register_page(&self) -> Result<(), Error> {
-        open_url(&self.register_url()?)
+        let device = self.device_id()?;
+        let presence = presence::start(
+            device,
+            &self.product.contract,
+            &presence::origin_of(&self.product.site_url),
+            REGISTER_WAIT,
+            Arc::new(AtomicBool::new(false)),
+        )?;
+        let url = format!(
+            "{}&port={}&code={}",
+            self.register_url()?,
+            presence.port,
+            presence.code
+        );
+        open_url(&url)
     }
 
     /// Opens the buy page in the default browser.
@@ -337,12 +366,34 @@ impl Client {
     }
 
     /// The official build that contains a file with this SHA-256.
+    ///
+    /// The SHA-256 must have 64 hex characters, and the answer must name the
+    /// same SHA-256.
     pub fn find_artifact(&self, sha256: &str) -> Result<Option<ArtifactMatch>, Error> {
-        rpc::find_artifact(&self.product.rpc_url, &self.product.contract, sha256)
+        let sha256 = sha256.to_ascii_lowercase();
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::Io("a SHA-256 has 64 hex characters".into()));
+        }
+        let found = rpc::find_artifact(&self.product.rpc_url, &self.product.contract, &sha256)?;
+        if let Some(m) = &found {
+            if m.artifact.sha256.to_ascii_lowercase() != sha256 {
+                return Err(Error::Rpc(
+                    "the record is for another file than the one asked for".into(),
+                ));
+            }
+        }
+        Ok(found)
     }
 
     /// The official build record of the running program, or `None` if the
-    /// contract has no record of it (for example a self-built copy).
+    /// contract has no record of it (for example a self-built copy, or a
+    /// program that a release ships inside an archive or app bundle whose
+    /// record is the archive).
+    ///
+    /// This is not a security check: a changed program controls its own
+    /// answer. To check a download, hash the file from outside the program
+    /// (the BuildDeed website's verify page, or [`Client::find_artifact`] in
+    /// another program).
     pub fn verify_self(&self) -> Result<Option<ArtifactMatch>, Error> {
         let exe = std::env::current_exe().map_err(|e| Error::Io(e.to_string()))?;
         let sha = sha256_file(&exe).map_err(|e| Error::Io(e.to_string()))?;
@@ -375,14 +426,33 @@ pub fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
     Ok(hex::encode(h.finalize()))
 }
 
+/// How long the register page may take: the presence answer lasts this long,
+/// and the Bevy plugin waits this long for the seat.
+pub const REGISTER_WAIT: Duration = Duration::from_secs(600);
+
+/// Percent-encodes everything except the URL-safe characters.
+fn encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 fn open_url(url: &str) -> Result<(), Error> {
+    // Absolute paths on Windows and macOS, so that a program of the same name
+    // next to the app or earlier in PATH does not run. Linux desktops put
+    // xdg-open in different places, and it only opens the URL.
     let result = if cfg!(target_os = "windows") {
         // Not "cmd /C start": cmd reads each "&" in the URL as a command separator.
-        std::process::Command::new("rundll32")
+        std::process::Command::new(device::system32("rundll32.exe"))
             .args(["url.dll,FileProtocolHandler", url])
             .spawn()
     } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).spawn()
+        std::process::Command::new("/usr/bin/open").arg(url).spawn()
     } else {
         std::process::Command::new("xdg-open").arg(url).spawn()
     };
@@ -517,6 +587,45 @@ mod tests {
             "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed"
         );
         std::fs::remove_file(&p).unwrap();
+    }
+
+    #[test]
+    fn short_id_and_urls_are_safe_for_any_input() {
+        let c = Client::with_device(Product::testnet("c", "k&x=1", "1.0 beta"), "é");
+        assert_eq!(c.short_device_id().unwrap(), "é");
+        let u = c.register_url().unwrap();
+        assert!(
+            u.contains("product=k%26x%3D1&device=%C3%A9&version=1.0%20beta"),
+            "{u}"
+        );
+    }
+
+    #[test]
+    fn find_artifact_checks_input_and_answer() {
+        let other = serde_json::json!({
+            "version": "0.2.0", "commit": "a".repeat(40), "released_at_ms": 5u64,
+            "artifact": { "platform": "linux-x86_64", "file": "f", "sha256": "c".repeat(64),
+                          "attestation_url": null }
+        });
+        let url = fake_rpc::serve(vec![fake_rpc::view(other)]);
+        let c = client(url);
+        assert!(
+            matches!(c.find_artifact("xyz"), Err(Error::Io(_))),
+            "bad input"
+        );
+        assert!(
+            matches!(c.find_artifact(&"B".repeat(64)), Err(Error::Rpc(m)) if m.contains("another file")),
+            "answer for another hash"
+        );
+    }
+
+    #[test]
+    fn plain_http_rpc_is_refused_except_loopback() {
+        let c = Client::with_device(
+            Product::testnet("c", "k", "1").with_rpc_url("http://rpc.example.com"),
+            dev(),
+        );
+        assert!(matches!(c.check(), Err(Error::Rpc(m)) if m.contains("https")));
     }
 
     #[test]

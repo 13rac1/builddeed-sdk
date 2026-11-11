@@ -61,6 +61,14 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
             "args_base64": B64.encode(args.to_string()),
         }
     });
+    // HTTPS only, so that nobody on the network path can answer for the
+    // contract. Loopback is allowed for tests and local nodes.
+    let loopback = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+        .iter()
+        .any(|p| rpc_url.starts_with(p));
+    if !rpc_url.starts_with("https://") && !loopback {
+        return Err(Error::Rpc(format!("the RPC URL must use https: {rpc_url}")));
+    }
     let resp: Value = match ureq::post(rpc_url)
         .timeout(Duration::from_secs(15))
         .send_json(body)

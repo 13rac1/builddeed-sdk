@@ -29,16 +29,15 @@
 //! worker thread; a second request while waiting stops the wait. A
 //! [`BuyRequest`] opens the buy page.
 
-use crate::{Client, Error, Product, Seat};
+use crate::{Client, Error, Product, Seat, REGISTER_WAIT};
 use bevy::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// How often the plugin asks for the seat while waiting, and for how long.
+/// How often the plugin asks for the seat while waiting.
 const POLL_EVERY: Duration = Duration::from_secs(5);
-const REGISTER_WAIT: Duration = Duration::from_secs(600);
 
 /// Adds the [`License`] resource and the request events.
 pub struct BuildDeedPlugin {
@@ -142,7 +141,16 @@ fn receive(inbox: Res<Inbox>, mut license: ResMut<License>) {
 
 fn apply(license: &mut License, msg: Msg) {
     match msg {
-        Msg::Check(Ok(Some(s))) => license.state = LicenseState::Registered(s),
+        Msg::Check(Ok(Some(s))) => {
+            // A seat ends any wait for one.
+            if let Some(stop) = license.stop.take() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            license.state = LicenseState::Registered(s);
+        }
+        // The start check can answer after the player asked to register:
+        // keep waiting for the seat.
+        Msg::Check(_) if license.state == LicenseState::Waiting => {}
         Msg::Check(Ok(None)) => license.state = LicenseState::Unregistered,
         Msg::Check(Err(e)) => {
             license.message = format!("Cannot check the license: {e}");
@@ -230,6 +238,30 @@ mod tests {
         assert!(
             matches!(&license.state, LicenseState::Registered(s) if s.account_id == "c.testnet")
         );
+    }
+
+    #[test]
+    fn a_late_start_check_does_not_end_the_wait() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut license = License {
+            state: LicenseState::Waiting,
+            client: Client::with_device(Product::testnet("x", "x", "1"), "a".repeat(64)),
+            message: String::new(),
+            stop: Some(stop.clone()),
+        };
+        apply(&mut license, Msg::Check(Ok(None)));
+        assert_eq!(license.state, LicenseState::Waiting);
+        apply(&mut license, Msg::Check(Err(Error::Network("down".into()))));
+        assert_eq!(license.state, LicenseState::Waiting);
+        assert!(!stop.load(Ordering::Relaxed));
+        let seat = Seat {
+            account_id: "a".into(),
+            token_id: "1".into(),
+            updates_until_ms: 1,
+        };
+        apply(&mut license, Msg::Check(Ok(Some(seat))));
+        assert!(license.is_registered());
+        assert!(stop.load(Ordering::Relaxed), "the wait stops");
     }
 
     #[test]

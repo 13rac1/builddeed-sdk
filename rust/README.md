@@ -37,7 +37,7 @@ website.
 | `check()` | The seat of this computer on a license that covers this version, or `None`. One view call. |
 | `status()` | Like `check()`, and tells "license ended, renew" apart from "no seat". |
 | `device_id_from(contract, machine_id)` | The computer id rule of the spec, for tests and tools. |
-| `register_url()`, `open_register_page()` | The BuildDeed register page for this computer. |
+| `register_url()`, `open_register_page()` | The BuildDeed register page for this computer; `open_register_page` adds the presence check. |
 | `buy_url()`, `open_buy_page()` | The buy page of the product. |
 | `wait_for_seat(stop, every, max)` | Polls until the seat is there, `stop` is set, or `max` passes. |
 | `find_artifact(sha256)` | The official build record of a file. |
@@ -55,7 +55,15 @@ website.
 - No offline mode: a license result stored on the computer could be copied or
   edited, so the SDK stores none. With no network, run unregistered.
 - The computer id is computed at each start and never stored, so a copied
-  file does not move a seat. Computers cloned from one disk image share an id.
+  app file does not move a seat. A user with root or administrator rights can
+  set the machine id, and computers cloned from one disk image share an id:
+  the seat limit does not hold against a copied machine id.
+- `open_register_page` runs the presence check: for 10 minutes the program
+  answers a one-time code on 127.0.0.1, and the website asks the owner's
+  wallet only when the answer names this computer.
+- RPC endpoints must use https (loopback excepted). `find_artifact` checks
+  that the answer is for the file it asked about. `verify_self` is not a
+  security check: a changed program controls its own answer.
 - The check is in your public source code. Anyone may build your program
   without it; the official build is the one that your contract records.
 

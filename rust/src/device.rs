@@ -2,9 +2,15 @@
 //!
 //! The id is the SHA-256 of the operating system's machine id, the license
 //! contract and a fixed label. The app computes it at each start and does
-//! not store it, so a copied file does not move a seat to another computer.
-//! The hash hides the machine id, and the contract in the hash gives each
-//! product a different id for the same computer.
+//! not store it, so a copied app file does not move a seat to another
+//! computer. The hash hides the machine id, and the contract in the hash
+//! gives each product a different id for the same computer.
+//!
+//! Limit: a user with root or administrator rights can set the machine id of
+//! a computer, so a machine id copied from a computer with a seat registers
+//! another computer. The helper programs are called by absolute path, so
+//! that a program of the same name earlier in PATH, or next to the app,
+//! cannot answer in their place.
 
 use sha2::{Digest, Sha256};
 
@@ -20,32 +26,53 @@ pub(crate) fn id_from(contract: &str, machine_id: &str) -> String {
     hex::encode(h)
 }
 
+/// A machine id must have at least this many characters.
+const MIN_LEN: usize = 16;
+
+/// True for a machine id that the computer can use: long enough, and not the
+/// placeholder of an image that systemd did not set up yet.
+fn usable(id: &str) -> bool {
+    id.len() >= MIN_LEN && id != "uninitialized"
+}
+
 /// The machine id that the operating system keeps for this installation.
 fn machine_id() -> Result<String, String> {
     let id = if cfg!(target_os = "linux") {
+        // The first file with a usable id: an empty or "uninitialized"
+        // /etc/machine-id falls back to the D-Bus copy.
         ["/etc/machine-id", "/var/lib/dbus/machine-id"]
             .iter()
-            .find_map(|p| std::fs::read_to_string(p).ok())
+            .filter_map(|p| std::fs::read_to_string(p).ok())
             .map(|s| s.trim().to_string())
+            .find(|s| usable(s))
     } else if cfg!(target_os = "macos") {
-        command_output("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])
+        command_output("/usr/sbin/ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])
             .and_then(|out| parse_ioreg(&out))
     } else if cfg!(target_os = "windows") {
+        // /reg:64: a 32-bit program must read the 64-bit registry view, where
+        // MachineGuid is.
         command_output(
-            "reg",
+            &system32("reg.exe"),
             &[
                 "query",
                 r"HKLM\SOFTWARE\Microsoft\Cryptography",
                 "/v",
                 "MachineGuid",
+                "/reg:64",
             ],
         )
         .and_then(|out| parse_reg(&out))
     } else {
         None
     };
-    id.filter(|s| s.len() >= 16)
+    id.filter(|s| usable(s))
         .ok_or_else(|| "Cannot read the machine id of this computer".to_string())
+}
+
+/// The absolute path of a program in Windows' System32 folder.
+pub(crate) fn system32(program: &str) -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\{program}")
 }
 
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
@@ -110,6 +137,19 @@ mod tests {
             id_from("c.testnet", "m"),
             "d0df87748868c2490de8dbf477ba0c8993f7ae9c7d2199e3216551a277480be9"
         );
+    }
+
+    #[test]
+    fn unusable_machine_ids_are_refused() {
+        assert!(!usable(""));
+        assert!(!usable("uninitialized"));
+        assert!(!usable("0123456789abcde"));
+        assert!(usable("0123456789abcdef"));
+    }
+
+    #[test]
+    fn system32_is_an_absolute_windows_path() {
+        assert!(system32("reg.exe").ends_with(r"\System32\reg.exe"));
     }
 
     #[test]
