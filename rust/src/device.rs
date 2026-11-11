@@ -1,10 +1,11 @@
 //! The computer id: a seat on a license is for one computer.
 //!
 //! The id is the SHA-256 of the operating system's machine id, the license
-//! contract and a fixed label. The app computes it at each start and does
-//! not store it, so a copied app file does not move a seat to another
-//! computer. The hash hides the machine id, and the contract in the hash
-//! gives each product a different id for the same computer.
+//! contract, the product key and a fixed label. The app computes it at each
+//! start and does not store it, so a copied app file does not move a seat to
+//! another computer. The hash hides the machine id, and the contract and
+//! product in the hash give each product a different id for the same
+//! computer.
 //!
 //! Limit: a user with root or administrator rights can set the machine id of
 //! a computer, so a machine id copied from a computer with a seat registers
@@ -16,13 +17,14 @@ use sha2::{Digest, Sha256};
 
 const LABEL: &str = "builddeed-device-v1";
 
-/// The computer id for a license contract: 64 lowercase hex characters.
-pub fn device_id(contract: &str) -> Result<String, String> {
-    Ok(id_from(contract, &machine_id()?))
+/// The computer id for a product of a license contract: 64 lowercase hex
+/// characters.
+pub fn device_id(contract: &str, product: &str) -> Result<String, String> {
+    Ok(id_from(contract, product, &machine_id()?))
 }
 
-pub(crate) fn id_from(contract: &str, machine_id: &str) -> String {
-    let h = Sha256::digest(format!("{LABEL}\n{contract}\n{machine_id}").as_bytes());
+pub(crate) fn id_from(contract: &str, product: &str, machine_id: &str) -> String {
+    let h = Sha256::digest(format!("{LABEL}\n{contract}\n{product}\n{machine_id}").as_bytes());
     hex::encode(h)
 }
 
@@ -110,32 +112,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn id_is_hex_and_depends_on_contract_and_machine() {
-        let a = id_from("demo.builddeed.testnet", "0123456789abcdef0123456789abcdef");
+    fn id_is_hex_and_depends_on_contract_product_and_machine() {
+        let m = "0123456789abcdef0123456789abcdef";
+        let a = id_from("licenses.builddeed.testnet", "doom", m);
         assert_eq!(a.len(), 64);
         assert!(a
             .bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
-        assert_eq!(
-            a,
-            id_from("demo.builddeed.testnet", "0123456789abcdef0123456789abcdef")
-        );
+        assert_eq!(a, id_from("licenses.builddeed.testnet", "doom", m));
+        assert_ne!(a, id_from("other.testnet", "doom", m));
+        assert_ne!(a, id_from("licenses.builddeed.testnet", "checksum", m));
         assert_ne!(
             a,
-            id_from("other.testnet", "0123456789abcdef0123456789abcdef")
-        );
-        assert_ne!(
-            a,
-            id_from("demo.builddeed.testnet", "fedcba9876543210fedcba9876543210")
+            id_from(
+                "licenses.builddeed.testnet",
+                "doom",
+                "fedcba9876543210fedcba9876543210"
+            )
         );
     }
 
     #[test]
     fn id_matches_a_fixed_value() {
-        // printf 'builddeed-device-v1\nc.testnet\nm' | sha256sum
+        // printf 'builddeed-device-v1\nc.testnet\np\nm' | sha256sum
         assert_eq!(
-            id_from("c.testnet", "m"),
-            "d0df87748868c2490de8dbf477ba0c8993f7ae9c7d2199e3216551a277480be9"
+            id_from("c.testnet", "p", "m"),
+            "2c5f892217c817ffa5f7acd469abed07a426cbd850cd240c9d47841e0d2953b0"
         );
     }
 
@@ -177,7 +179,12 @@ mod tests {
     fn this_computer_has_an_id() {
         // The build container has /etc/machine-id only if the image has one.
         if std::path::Path::new("/etc/machine-id").exists() {
-            assert_eq!(device_id("demo.builddeed.testnet").unwrap().len(), 64);
+            assert_eq!(
+                device_id("licenses.builddeed.testnet", "doom")
+                    .unwrap()
+                    .len(),
+                64
+            );
         }
     }
 }

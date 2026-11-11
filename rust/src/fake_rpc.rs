@@ -4,7 +4,7 @@
 //! ```
 //! use builddeed::fake_rpc;
 //! let url = fake_rpc::serve(vec![fake_rpc::seat("1", "alice.testnet", true)]);
-//! let product = builddeed::Product::testnet("demo.builddeed.testnet", "demo", "0.1.0").with_rpc_url(url);
+//! let product = builddeed::Product::testnet("licenses.builddeed.testnet", "checksum", "0.1.0").with_rpc_url(url);
 //! let client = builddeed::Client::with_device(product, "a".repeat(64));
 //! assert_eq!(client.check().unwrap().unwrap().account_id, "alice.testnet");
 //! ```

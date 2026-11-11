@@ -89,6 +89,7 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
 pub(crate) fn device_license(
     rpc_url: &str,
     contract: &str,
+    product: &str,
     device_id: &str,
     version: &str,
 ) -> Result<Option<DeviceLicense>, Error> {
@@ -96,20 +97,21 @@ pub(crate) fn device_license(
         rpc_url,
         contract,
         "device_license",
-        json!({ "device_id": device_id, "version": version }),
+        json!({ "product": product, "device_id": device_id, "version": version }),
     )
 }
 
 pub(crate) fn find_artifact(
     rpc_url: &str,
     contract: &str,
+    product: &str,
     sha256: &str,
 ) -> Result<Option<ArtifactMatch>, Error> {
     view(
         rpc_url,
         contract,
         "find_artifact",
-        json!({ "sha256": sha256 }),
+        json!({ "product": product, "sha256": sha256 }),
     )
 }
 
@@ -125,17 +127,17 @@ mod tests {
             fake_rpc::error("INTERNAL_ERROR"),
             (503, "{}".into()),
         ]);
-        let e = device_license(&url, "c", "d", "1").unwrap_err();
+        let e = device_license(&url, "c", "p", "d", "1").unwrap_err();
         assert!(
             matches!(&e, Error::Rpc(m) if m.contains("does not exist")),
             "{e}"
         );
         assert!(matches!(
-            device_license(&url, "c", "d", "1"),
+            device_license(&url, "c", "p", "d", "1"),
             Err(Error::Rpc(_))
         ));
         assert!(matches!(
-            device_license(&url, "c", "d", "1"),
+            device_license(&url, "c", "p", "d", "1"),
             Err(Error::Rpc(_))
         ));
     }
@@ -147,7 +149,8 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        let e = device_license(&format!("http://127.0.0.1:{port}"), "c", "d", "1").unwrap_err();
+        let e =
+            device_license(&format!("http://127.0.0.1:{port}"), "c", "p", "d", "1").unwrap_err();
         assert!(matches!(e, Error::Network(_)), "{e}");
     }
 

@@ -17,6 +17,7 @@ fn device_id_vectors() {
     for c in cases {
         let got = builddeed::device_id_from(
             c["contract"].as_str().unwrap(),
+            c["product"].as_str().unwrap(),
             c["machine_id"].as_str().unwrap(),
         );
         assert_eq!(got, c["device_id"].as_str().unwrap(), "{c}");
@@ -68,7 +69,7 @@ fn device_license_replies() {
     for c in f["cases"].as_array().unwrap() {
         let url = fake_rpc::serve(vec![(200, c["body"].to_string())]);
         let client = Client::with_device(
-            Product::testnet("doom.builddeed.testnet", "doom", "0.2.0").with_rpc_url(url),
+            Product::testnet("licenses.builddeed.testnet", "doom", "0.2.0").with_rpc_url(url),
             "a".repeat(64),
         );
         let got = client.status();

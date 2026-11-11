@@ -16,7 +16,7 @@ builddeed = { git = "https://github.com/13rac1/builddeed-sdk", tag = "rust-v0.1.
 use builddeed::{Client, Product};
 
 let client = Client::new(Product::testnet(
-    "doom.builddeed.testnet", // your license contract
+    "licenses.builddeed.testnet", // the official BuildDeed contract
     "doom",                   // your product key on the BuildDeed website
     env!("CARGO_PKG_VERSION"),
 ));

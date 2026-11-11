@@ -5,12 +5,15 @@ What every BuildDeed SDK does, in any language. The files in
 
 ## Product
 
-A product is one license contract on NEAR plus the program's version.
+A product is a key in a license contract on NEAR, plus the program's
+version. One contract holds many products, and all of their licenses are one
+NFT collection. The official BuildDeed collection on testnet is
+`licenses.builddeed.testnet`.
 
 | Field | Example | Note |
 | --- | --- | --- |
-| `contract` | `doom.builddeed.testnet` | The account of the license contract. |
-| `key` | `doom` | The product key on the BuildDeed website. |
+| `contract` | `licenses.builddeed.testnet` | The account of the license contract. |
+| `key` | `doom` | The product key in the contract (`add_product`) and on the website. |
 | `version` | `0.2.0` | The version of the running program, as the release records it with `add_build`. |
 | `rpc_url` | `https://rpc.testnet.fastnear.com` | A NEAR JSON-RPC endpoint of the contract's network. |
 | `site_url` | `https://13rac1.github.io/builddeed` | The BuildDeed website, no trailing slash. |
@@ -18,7 +21,7 @@ A product is one license contract on NEAR plus the program's version.
 ## Computer id
 
 ```
-device_id = lowercase hex( SHA-256( "builddeed-device-v1" + "\n" + contract + "\n" + machine_id ) )
+device_id = lowercase hex( SHA-256( "builddeed-device-v1" + "\n" + contract + "\n" + key + "\n" + machine_id ) )
 ```
 
 - `machine_id` is the operating system's id of the installation, as text,
@@ -50,7 +53,7 @@ One view call at each start:
 {"jsonrpc":"2.0","id":"builddeed","method":"query","params":{
   "request_type":"call_function","finality":"final",
   "account_id":"<contract>","method_name":"device_license",
-  "args_base64":"<base64 of {\"device_id\":\"<device_id>\",\"version\":\"<version>\"}>"}}
+  "args_base64":"<base64 of {\"product\":\"<key>\",\"device_id\":\"<device_id>\",\"version\":\"<version>\"}>"}}
 ```
 
 The view result is the bytes of a JSON value:
@@ -132,8 +135,8 @@ reads `&` as a command separator). Test data:
 
 ## Build records
 
-`find_artifact({"sha256": "<64 hex>"})` returns the official build that
-contains a file, or `null`. Refuse an input that is not 64 hex characters,
+`find_artifact({"product": "<key>", "sha256": "<64 hex>"})` returns the
+official build of the product that contains a file, or `null`. Refuse an input that is not 64 hex characters,
 and an answer whose `artifact.sha256` is not the one asked for:
 
 ```json

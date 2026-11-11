@@ -1,7 +1,7 @@
 {
   "comment": "URLs that every SDK must build for this product and computer.",
   "product": {
-    "contract": "doom.builddeed.testnet",
+    "contract": "licenses.builddeed.testnet",
     "key": "doom",
     "version": "0.2.0",
     "site_url": "https://13rac1.github.io/builddeed"

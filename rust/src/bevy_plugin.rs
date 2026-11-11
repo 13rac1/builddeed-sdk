@@ -9,7 +9,7 @@
 //!     App::new()
 //!         .add_plugins(MinimalPlugins)
 //!         .add_plugins(BuildDeedPlugin::new(Product::testnet(
-//!             "doom.builddeed.testnet",
+//!             "licenses.builddeed.testnet",
 //!             "doom",
 //!             env!("CARGO_PKG_VERSION"),
 //!         )))

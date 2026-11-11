@@ -12,7 +12,7 @@
 //! use builddeed::{Client, Product};
 //!
 //! let client = Client::new(Product::testnet(
-//!     "doom.builddeed.testnet", // your license contract
+//!     "licenses.builddeed.testnet", // the official BuildDeed contract
 //!     "doom",                   // your product key on the BuildDeed website
 //!     env!("CARGO_PKG_VERSION"),
 //! ));
@@ -56,12 +56,17 @@ pub enum Network {
     Mainnet,
 }
 
+/// The contract of the official BuildDeed collection on NEAR testnet. Every
+/// product in it is one NFT collection.
+pub const OFFICIAL_TESTNET_CONTRACT: &str = "licenses.builddeed.testnet";
+
 /// The product that this program sells: its license contract and version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Product {
-    /// The account of the license contract, for example `doom.builddeed.testnet`.
+    /// The account of the license contract, for example
+    /// [`OFFICIAL_TESTNET_CONTRACT`].
     pub contract: String,
-    /// The product key on the BuildDeed website, for example `doom`.
+    /// The product key in the contract (`add_product`), for example `doom`.
     pub key: String,
     /// The version of this program, as the release records it.
     pub version: String,
@@ -134,11 +139,12 @@ pub enum Status {
     NoSeat,
 }
 
-/// The computer id for a contract and a machine id: lowercase hex of
-/// SHA-256("builddeed-device-v1\n" + contract + "\n" + machine_id). See
-/// `spec/README.md`. [`Client::new`] reads the machine id of this computer.
-pub fn device_id_from(contract: &str, machine_id: &str) -> String {
-    device::id_from(contract, machine_id)
+/// The computer id for a contract, a product key and a machine id:
+/// lowercase hex of SHA-256("builddeed-device-v1\n" + contract + "\n" +
+/// product + "\n" + machine_id). See `spec/README.md`. [`Client::new`] reads
+/// the machine id of this computer.
+pub fn device_id_from(contract: &str, product: &str, machine_id: &str) -> String {
+    device::id_from(contract, product, machine_id)
 }
 
 /// The 6-digit confirmation code of a computer id. The program shows it while
@@ -229,7 +235,8 @@ pub struct Client {
 impl Client {
     /// A client for `product`, with this computer's id.
     pub fn new(product: Product) -> Self {
-        let device = device::device_id(&product.contract).map_err(|_| Error::NoMachineId);
+        let device =
+            device::device_id(&product.contract, &product.key).map_err(|_| Error::NoMachineId);
         Self { product, device }
     }
 
@@ -295,6 +302,7 @@ impl Client {
         rpc::device_license(
             &self.product.rpc_url,
             &self.product.contract,
+            &self.product.key,
             device,
             &self.product.version,
         )
@@ -393,7 +401,12 @@ impl Client {
         if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::Io("a SHA-256 has 64 hex characters".into()));
         }
-        let found = rpc::find_artifact(&self.product.rpc_url, &self.product.contract, &sha256)?;
+        let found = rpc::find_artifact(
+            &self.product.rpc_url,
+            &self.product.contract,
+            &self.product.key,
+            &sha256,
+        )?;
         if let Some(m) = &found {
             if m.artifact.sha256.to_ascii_lowercase() != sha256 {
                 return Err(Error::Rpc(
@@ -489,7 +502,8 @@ mod tests {
     }
 
     fn client(url: String) -> Client {
-        let product = Product::testnet("doom.builddeed.testnet", "doom", "0.2.0").with_rpc_url(url);
+        let product =
+            Product::testnet("licenses.builddeed.testnet", "doom", "0.2.0").with_rpc_url(url);
         Client::with_device(product, dev())
     }
 
