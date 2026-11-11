@@ -26,3 +26,29 @@ jobs:
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked
       - run: cargo test --locked --all-features
+
+  go:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        # Official Go images, pinned by digest: the version that go.mod names
+        # (1.26) and the current release (1.27).
+        image:
+          - docker.io/library/golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0
+          - docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: gofmt
+        run: |
+          gofmt -l . > /tmp/unformatted
+          cat /tmp/unformatted
+          test ! -s /tmp/unformatted
+      - run: go vet ./...
+      - run: GOOS=windows go vet ./... && GOOS=darwin go vet ./... && GOOS=freebsd go vet ./...
+      - run: GOOS=wasip1 GOARCH=wasm go vet ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - run: go test -race ./...

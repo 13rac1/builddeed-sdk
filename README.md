@@ -9,9 +9,10 @@ a record of official builds in the license contract.
 | [`spec/`](spec/README.md) | The client protocol: computer id, license check, registration, build records. |
 | [`fixtures/`](fixtures) | Test data that every SDK must pass: computer-id and confirmation-code vectors, RPC replies, URLs. |
 | [`rust/`](rust/README.md) | The Rust crate `builddeed` (feature `bevy` for a Bevy plugin). |
+| [`go/`](go/README.md) | The Go module `github.com/13rac1/builddeed-sdk/go`, standard library only. |
 
-Each SDK has its own version and tags: `rust-v0.1.0`, and later `go/v0.1.0`
-for a Go module in `go/`.
+Each SDK has its own version and tags: `rust-v0.1.0` for the Rust crate,
+`go/v0.1.0` for the Go module.
 
 ## Used by
 
