@@ -16,7 +16,7 @@ Each SDK has its own version and tags: `rust-v0.1.0` for the Rust crate,
 
 ## Used by
 
-- [BuildDeed Checksum](https://github.com/13rac1/builddeed/tree/main/app) (Rust, egui)
+- [BuildDeed Checksum](https://github.com/13rac1/builddeed/tree/main/app) (Rust, Slint)
 - [Room4Doom](https://github.com/ai-13rac1/room4doom) (Rust, a Doom engine; uses `Client` directly)
 
 ## License
