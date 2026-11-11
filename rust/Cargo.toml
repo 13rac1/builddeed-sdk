@@ -16,6 +16,10 @@ bevy = ["dep:bevy"]
 # The loopback fake RPC server, so that a product can test its gating offline.
 test-support = []
 
+[[test]]
+name = "fixtures"
+required-features = ["test-support"]
+
 [dependencies]
 base64 = "0.22"
 hex = "0.4"

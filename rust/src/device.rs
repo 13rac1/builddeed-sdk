@@ -15,7 +15,7 @@ pub fn device_id(contract: &str) -> Result<String, String> {
     Ok(id_from(contract, &machine_id()?))
 }
 
-fn id_from(contract: &str, machine_id: &str) -> String {
+pub(crate) fn id_from(contract: &str, machine_id: &str) -> String {
     let h = Sha256::digest(format!("{LABEL}\n{contract}\n{machine_id}").as_bytes());
     hex::encode(h)
 }

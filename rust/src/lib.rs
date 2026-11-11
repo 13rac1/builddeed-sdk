@@ -116,6 +116,28 @@ pub struct Seat {
     pub updates_until_ms: u64,
 }
 
+/// What the contract says about this computer, for this version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    /// A seat on a license that covers this version: registered.
+    Registered(Seat),
+    /// A seat, but the license ended before this version: tell the user to
+    /// renew.
+    LicenseEnded {
+        /// The license token id.
+        token_id: String,
+    },
+    /// No seat: unregistered.
+    NoSeat,
+}
+
+/// The computer id for a contract and a machine id: lowercase hex of
+/// SHA-256("builddeed-device-v1\n" + contract + "\n" + machine_id). See
+/// `spec/README.md`. [`Client::new`] reads the machine id of this computer.
+pub fn device_id_from(contract: &str, machine_id: &str) -> String {
+    device::id_from(contract, machine_id)
+}
+
 /// One file of an official build.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Artifact {
@@ -227,10 +249,21 @@ impl Client {
     /// The seat of this computer on a license that covers this version, or
     /// `None`. One view call; call it at each start.
     pub fn check(&self) -> Result<Option<Seat>, Error> {
-        match self.raw_seat()? {
-            Some(d) if d.covers_version => Ok(Some(seat(d))),
+        match self.status()? {
+            Status::Registered(s) => Ok(Some(s)),
             _ => Ok(None),
         }
+    }
+
+    /// Like [`Client::check`], but tells "license ended" apart from "no seat".
+    pub fn status(&self) -> Result<Status, Error> {
+        Ok(match self.raw_seat()? {
+            Some(d) if d.covers_version => Status::Registered(seat(d)),
+            Some(d) => Status::LicenseEnded {
+                token_id: d.token_id,
+            },
+            None => Status::NoSeat,
+        })
     }
 
     fn raw_seat(&self) -> Result<Option<rpc::DeviceLicense>, Error> {

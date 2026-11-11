@@ -1,0 +1,13 @@
+{
+  "comment": "URLs that every SDK must build for this product and computer.",
+  "product": {
+    "contract": "doom.builddeed.testnet",
+    "key": "doom",
+    "version": "0.2.0",
+    "site_url": "https://13rac1.github.io/builddeed"
+  },
+  "device_id": "6844b8b00000000000000000000000000000000000000000000000000000af75",
+  "register_url": "https://13rac1.github.io/builddeed/register.html#product=doom&device=6844b8b00000000000000000000000000000000000000000000000000000af75&version=0.2.0",
+  "buy_url": "https://13rac1.github.io/builddeed/buy.html?product=doom",
+  "short_device_id": "6844b8b0...af75"
+}
