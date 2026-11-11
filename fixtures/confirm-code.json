@@ -1,0 +1,33 @@
+{
+  "comment": "confirm_code = decimal(first 4 bytes of SHA-256(\"builddeed-confirm-v1\\n\" + device_id), big-endian) mod 1000000, 6 digits with leading zeros. Made with Python hashlib, not with an SDK.",
+  "cases": [
+    {
+      "device_id": "88c23aca46a803840794e32d6bb90dd1c59612ce4d47e4a0ec0fbaf854aef87c",
+      "code": "177329"
+    },
+    {
+      "device_id": "f33c4b1f71105ef3ab3e157c4bbcc187fead6451de674e5a0d7a4004fd9780f5",
+      "code": "697243"
+    },
+    {
+      "device_id": "dd9142eaf354d608a6b90d37b850fc400058467bd7003402fccd183ede67e2a1",
+      "code": "021521"
+    },
+    {
+      "device_id": "a03b07a8167ec2e614102ecc180c4cd0cfb9ba1746d12594893c9f10f52ab2c0",
+      "code": "577529"
+    },
+    {
+      "device_id": "f7e5e1962323d96717994fb1f9f636e8abcaa0a626d6ab4137528c311d7c8924",
+      "code": "800376"
+    },
+    {
+      "device_id": "e00e15d19a9c4c164895f01f3dda84c3fa8a118ce17048ebd67ba6518d51f190",
+      "code": "540265"
+    },
+    {
+      "device_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "code": "975844"
+    }
+  ]
+}

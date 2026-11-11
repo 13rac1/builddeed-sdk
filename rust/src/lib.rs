@@ -33,6 +33,7 @@
 //! without it; the official build is the one that your contract records.
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -138,6 +139,17 @@ pub enum Status {
 /// `spec/README.md`. [`Client::new`] reads the machine id of this computer.
 pub fn device_id_from(contract: &str, machine_id: &str) -> String {
     device::id_from(contract, machine_id)
+}
+
+/// The 6-digit confirmation code of a computer id. The program shows it while
+/// the register page is open; the page asks for it when the browser blocks
+/// the presence check. Decimal of the first 4 bytes (big-endian) of
+/// SHA-256("builddeed-confirm-v1\n" + device_id), modulo 1 000 000, with
+/// leading zeros. See `spec/README.md`.
+pub fn confirm_code_from(device_id: &str) -> String {
+    let hash = Sha256::digest(format!("builddeed-confirm-v1\n{device_id}").as_bytes());
+    let n = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
+    format!("{:06}", n % 1_000_000)
 }
 
 /// One file of an official build.
@@ -249,6 +261,13 @@ impl Client {
             (Some(a), Some(b)) if d.len() > 12 => format!("{a}...{b}"),
             _ => d.to_string(),
         })
+    }
+
+    /// The 6-digit code that the program shows while the register page is
+    /// open (see [`confirm_code_from`]). Show it next to the instruction
+    /// "If the page asks for a code, enter this one".
+    pub fn confirm_code(&self) -> Result<String, Error> {
+        Ok(confirm_code_from(self.device_id()?))
     }
 
     /// The seat of this computer on a license that covers this version, or
@@ -411,7 +430,6 @@ fn seat(d: rpc::DeviceLicense) -> Seat {
 
 /// SHA-256 of a file, lowercase hex, read in 64 KiB blocks.
 pub fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();

@@ -100,8 +100,30 @@ The page fetches `http://127.0.0.1:<port>/builddeed/<code>`. It enables the
 "Register this computer" button only when the answer names the `device` and
 the contract of the link. When the answer names another computer, it refuses.
 When the browser blocks the request (some browsers ask the user first, others
-do not allow a public page to reach 127.0.0.1), it shows a warning and asks
-the owner to confirm that they opened the page from the program.
+do not allow a public page to reach 127.0.0.1), the page asks for the
+confirmation code (below).
+
+### Confirmation code
+
+While the register page is open, the program shows a 6-digit code with the
+text "If the page asks for a code, enter this one":
+
+```
+confirm_code = decimal( first 4 bytes of SHA-256( "builddeed-confirm-v1" + "\n" + device_id ), big-endian ) mod 1000000
+```
+
+Write it with 6 digits (leading zeros). The page computes the same code from
+the `device` of the link and asks for it only when the presence check was
+blocked or the link has no `port` and `code`. A link for another computer
+expects that computer's code, and the program here shows another one, so
+the page refuses.
+
+Limit: the code comes from the computer id, which is in the link. A person
+who sends a link for their computer can also send its code. The code stops
+an owner who clicks through without looking at the program; it does not
+stop an owner who types a code from a message. Only the presence check
+proves that the program is on this computer. Test data:
+[`fixtures/confirm-code.json`](../fixtures/confirm-code.json).
 
 The buy page is `<site_url>/buy.html?product=<key>`. On Windows, open URLs
 with `rundll32 url.dll,FileProtocolHandler <url>`, not `cmd /C start` (cmd

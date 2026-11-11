@@ -38,6 +38,7 @@ website.
 | `status()` | Like `check()`, and tells "license ended, renew" apart from "no seat". |
 | `device_id_from(contract, machine_id)` | The computer id rule of the spec, for tests and tools. |
 | `register_url()`, `open_register_page()` | The BuildDeed register page for this computer; `open_register_page` adds the presence check. |
+| `confirm_code()` | The 6-digit code to show while the register page is open. The page asks for it when the browser blocks the presence check. |
 | `buy_url()`, `open_buy_page()` | The buy page of the product. |
 | `wait_for_seat(stop, every, max)` | Polls until the seat is there, `stop` is set, or `max` passes. |
 | `find_artifact(sha256)` | The official build record of a file. |
@@ -60,7 +61,9 @@ website.
   the seat limit does not hold against a copied machine id.
 - `open_register_page` runs the presence check: for 10 minutes the program
   answers a one-time code on 127.0.0.1, and the website asks the owner's
-  wallet only when the answer names this computer.
+  wallet only when the answer names this computer. When the browser blocks
+  the check, the page asks for `confirm_code()`: show it in your waiting
+  screen.
 - RPC endpoints must use https (loopback excepted). `find_artifact` checks
   that the answer is for the file it asked about. `verify_self` is not a
   security check: a changed program controls its own answer.

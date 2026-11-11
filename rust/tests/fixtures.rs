@@ -24,6 +24,23 @@ fn device_id_vectors() {
 }
 
 #[test]
+fn confirm_code_vectors() {
+    let f = fixture("confirm-code.json");
+    let cases = f["cases"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for c in cases {
+        let d = c["device_id"].as_str().unwrap();
+        assert_eq!(
+            builddeed::confirm_code_from(d),
+            c["code"].as_str().unwrap(),
+            "{c}"
+        );
+        let client = Client::with_device(Product::testnet("c", "k", "1"), d);
+        assert_eq!(client.confirm_code().unwrap(), c["code"].as_str().unwrap());
+    }
+}
+
+#[test]
 fn url_vectors() {
     let f = fixture("urls.json");
     let p = &f["product"];
