@@ -1,0 +1,30 @@
+[package]
+name = "builddeed"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Sell a Rust program with BuildDeed: license NFTs on NEAR with computer seats and a record of official builds"
+repository = "https://github.com/13rac1/builddeed-sdk"
+keywords = ["near", "license", "nft", "shareware", "reproducible-builds"]
+categories = ["authentication", "api-bindings"]
+
+[features]
+default = []
+# A Bevy plugin: License resource, RegisterRequest and BuyRequest events.
+bevy = ["dep:bevy"]
+# The loopback fake RPC server, so that a product can test its gating offline.
+test-support = []
+
+[dependencies]
+base64 = "0.22"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ureq = { version = "2.12", features = ["json"] }
+bevy = { version = "0.15", default-features = false, optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
