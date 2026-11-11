@@ -41,6 +41,9 @@ use std::time::{Duration, Instant};
 mod device;
 mod presence;
 mod rpc;
+mod tx;
+
+pub use tx::KeyFile;
 
 #[cfg(feature = "bevy")]
 pub mod bevy_plugin;
@@ -169,6 +172,9 @@ pub struct Artifact {
     pub sha256: String,
     /// The URL of the provenance attestation.
     pub attestation_url: Option<String>,
+    /// The https URL to download the file, if the release recorded one.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// The official build that contains a file.
@@ -431,6 +437,156 @@ impl Client {
         let sha = sha256_file(&exe).map_err(|e| Error::Io(e.to_string()))?;
         self.find_artifact(&sha)
     }
+
+    // ----- Agents: no browser -----
+
+    /// The newest official build that has a file for `platform` (see
+    /// [`platform`]), or `None`.
+    pub fn latest_build(&self, platform: &str) -> Result<Option<ArtifactMatch>, Error> {
+        rpc::view(
+            &self.product.rpc_url,
+            &self.product.contract,
+            "latest_build",
+            serde_json::json!({ "product": self.product.key, "platform": platform }),
+        )
+    }
+
+    /// Downloads the newest official file for `platform` into `dir`, and
+    /// checks that its SHA-256 is the recorded one. Returns the path and the
+    /// record. A file with another SHA-256 is deleted and refused.
+    pub fn download_latest(
+        &self,
+        platform: &str,
+        dir: &std::path::Path,
+    ) -> Result<(std::path::PathBuf, ArtifactMatch), Error> {
+        let m = self
+            .latest_build(platform)?
+            .ok_or_else(|| Error::Io(format!("no official build for {platform}")))?;
+        let url = m
+            .artifact
+            .url
+            .clone()
+            .ok_or_else(|| Error::Io("the record has no download URL".into()))?;
+        if !url.starts_with("https://") {
+            return Err(Error::Io(format!("the download URL is not https: {url}")));
+        }
+        let name = std::path::Path::new(&m.artifact.file)
+            .file_name()
+            .ok_or_else(|| Error::Io("the record has no file name".into()))?;
+        let path = dir.join(name);
+        let resp = ureq::get(&url)
+            .call()
+            .map_err(|e| Error::Network(e.to_string()))?;
+        let mut file = std::fs::File::create(&path).map_err(|e| Error::Io(e.to_string()))?;
+        std::io::copy(&mut resp.into_reader(), &mut file).map_err(|e| Error::Io(e.to_string()))?;
+        drop(file);
+        let got = sha256_file(&path).map_err(|e| Error::Io(e.to_string()))?;
+        if got != m.artifact.sha256.to_ascii_lowercase() {
+            let _ = std::fs::remove_file(&path);
+            return Err(Error::Io(format!(
+                "the download has SHA-256 {got}, not the recorded {}",
+                m.artifact.sha256
+            )));
+        }
+        Ok((path, m))
+    }
+
+    /// Buys a license of this product for the key's account, paid from the
+    /// account's agent budget (`deposit_budget`). `key` can be a
+    /// function-call key for the methods `buy_from_budget` and
+    /// `add_device_from_budget`. Returns the token id.
+    pub fn buy_with_key(&self, key: &KeyFile) -> Result<String, Error> {
+        let v = tx::call(
+            &self.product.rpc_url,
+            key,
+            &self.product.contract,
+            "buy_from_budget",
+            &serde_json::json!({ "product": self.product.key }),
+        )?;
+        v["token_id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| Error::Rpc("the reply has no token id".into()))
+    }
+
+    /// Registers this computer on a license of the key's account, with no
+    /// browser, and pays the storage from the account's agent budget.
+    /// `token_id` picks the license; with `None`, the first license of this
+    /// product with a free seat. Returns the token id. If this computer
+    /// already has a seat on a license of the account, returns that one.
+    ///
+    /// The presence check of the register page is not needed here: it stops
+    /// a link from another person, and here the owner's own key signs on
+    /// this computer.
+    pub fn register_with_key(
+        &self,
+        key: &KeyFile,
+        token_id: Option<&str>,
+    ) -> Result<String, Error> {
+        if key.account_id.is_empty() {
+            return Err(Error::Io(
+                "the key file has no account_id: give the account of the key".into(),
+            ));
+        }
+        let device = self.device_id()?.to_string();
+        #[derive(Deserialize)]
+        struct Lic {
+            token_id: String,
+            devices: Vec<String>,
+        }
+        let licenses: Vec<Lic> = rpc::view(
+            &self.product.rpc_url,
+            &self.product.contract,
+            "licenses_for_owner",
+            serde_json::json!({ "account_id": key.account_id, "product": self.product.key }),
+        )?;
+        if let Some(l) = licenses.iter().find(|l| l.devices.contains(&device)) {
+            return Ok(l.token_id.clone());
+        }
+        let token = match token_id {
+            Some(t) => t.to_string(),
+            None => {
+                #[derive(Deserialize)]
+                struct P {
+                    max_devices: usize,
+                }
+                let p: Option<P> = rpc::view(
+                    &self.product.rpc_url,
+                    &self.product.contract,
+                    "get_product",
+                    serde_json::json!({ "key": self.product.key }),
+                )?;
+                let max = p
+                    .ok_or_else(|| Error::Rpc("the product does not exist".into()))?
+                    .max_devices;
+                licenses
+                    .iter()
+                    .find(|l| l.devices.len() < max)
+                    .map(|l| l.token_id.clone())
+                    .ok_or_else(|| {
+                        Error::Rpc(format!(
+                            "{} has no license of {} with a free seat",
+                            key.account_id, self.product.key
+                        ))
+                    })?
+            }
+        };
+        tx::call(
+            &self.product.rpc_url,
+            key,
+            &self.product.contract,
+            "add_device_from_budget",
+            &serde_json::json!({ "token_id": token, "device_id": device }),
+        )?;
+        Ok(token)
+    }
+}
+
+/// The platform name of this computer, as the build records use it:
+/// `<os>-<arch>` with the Rust names, for example `linux-x86_64`,
+/// `windows-x86_64` or `macos-aarch64`.
+pub fn platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 fn seat(d: rpc::DeviceLicense) -> Seat {

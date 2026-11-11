@@ -27,7 +27,9 @@ fn classify(resp: &Value) -> Result<Value, Error> {
             .and_then(Value::as_str)
             .unwrap_or("");
         return Err(if UNKNOWN_CAUSES.contains(&cause) {
-            Error::Rpc(format!("the contract account does not exist ({cause})"))
+            Error::Rpc(format!(
+                "the account or the access key does not exist ({cause})"
+            ))
         } else {
             Error::Rpc(err.to_string())
         });
@@ -61,6 +63,14 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
             "args_base64": B64.encode(args.to_string()),
         }
     });
+    let result = post(rpc_url, body)?;
+    let bytes: Vec<u8> = serde_json::from_value(result["result"].clone())
+        .map_err(|e| Error::Rpc(format!("unexpected view result: {e}")))?;
+    serde_json::from_slice(&bytes).map_err(|e| Error::Rpc(format!("unexpected view result: {e}")))
+}
+
+/// Sends one JSON-RPC request and returns its classified result.
+pub(crate) fn post(rpc_url: &str, body: Value) -> Result<Value, Error> {
     // HTTPS only, so that nobody on the network path can answer for the
     // contract. Loopback is allowed for tests and local nodes.
     let loopback = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
@@ -70,7 +80,7 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
         return Err(Error::Rpc(format!("the RPC URL must use https: {rpc_url}")));
     }
     let resp: Value = match ureq::post(rpc_url)
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
         .send_json(body)
     {
         Ok(r) => r.into_json(),
@@ -80,10 +90,7 @@ pub(crate) fn view<T: serde::de::DeserializeOwned>(
         Err(e) => return Err(Error::Network(e.to_string())),
     }
     .map_err(|e| Error::Rpc(format!("the reply is not JSON: {e}")))?;
-    let result = classify(&resp)?;
-    let bytes: Vec<u8> = serde_json::from_value(result["result"].clone())
-        .map_err(|e| Error::Rpc(format!("unexpected view result: {e}")))?;
-    serde_json::from_slice(&bytes).map_err(|e| Error::Rpc(format!("unexpected view result: {e}")))
+    classify(&resp)
 }
 
 pub(crate) fn device_license(

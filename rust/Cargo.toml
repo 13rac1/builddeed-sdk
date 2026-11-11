@@ -22,6 +22,8 @@ required-features = ["test-support"]
 
 [dependencies]
 base64 = "0.22"
+bs58 = "0.5"
+ed25519-dalek = "2"
 getrandom = "0.2"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }

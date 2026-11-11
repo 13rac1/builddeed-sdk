@@ -43,6 +43,25 @@ website.
 | `wait_for_seat(stop, every, max)` | Polls until the seat is there, `stop` is set, or `max` passes. |
 | `find_artifact(sha256)` | The official build record of a file. |
 | `verify_self()` | The record of the running program; `None` for a self-built copy. |
+| `latest_build(platform)`, `download_latest(platform, dir)` | The newest official file for a platform; the download is refused unless its SHA-256 is the recorded one. |
+| `KeyFile::load(path)`, `buy_with_key(key)`, `register_with_key(key, token)` | Buy and register with a function-call key and the owner's agent budget, with no browser. |
+
+### Command line, for agents and CI
+
+```sh
+cargo install --git https://github.com/13rac1/builddeed-sdk builddeed --bin builddeed
+builddeed --product doom buy --key key.json        # {"token_id": "doom:1", ...}
+builddeed --product doom register --key key.json   # a seat for this computer
+builddeed --product doom download --out .          # newest official file, SHA-256 checked
+builddeed --product doom status
+```
+
+Every command prints one JSON object and exits with 0, or 1 and `{"error": ...}`.
+
+`--key` takes a NEAR key file. A file in `~/.near-credentials/<network>/<account>/`
+names its account by the folder; for a key file elsewhere, add `--account <id>`.
+Give the agent a function-call key, never a full-access key: see "Agents and
+programs with no browser" in the [spec](../spec/README.md).
 
 ## Features
 

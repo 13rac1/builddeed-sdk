@@ -149,6 +149,39 @@ and an answer whose `artifact.sha256` is not the one asked for:
 self-built copy. It is not a security check: a changed program controls its
 own answer. Check a download from outside the program.
 
+`latest_build({"product": "<key>", "platform": "<platform>"})` returns the
+newest build with a file for the platform, in the same form. Platform names
+are `<os>-<arch>` with the Rust names: `linux-x86_64`, `windows-x86_64`,
+`macos-aarch64`. An artifact can have a download `url` (https). After a
+download, compare the file's SHA-256 with the record, and delete the file if
+they differ.
+
+## Agents and programs with no browser
+
+An agent buys and registers with a NEAR function-call access key of the
+owner's account. Such a key can call only the listed methods of one
+contract, and it cannot attach NEAR, so the contract pays from an agent
+budget:
+
+1. The owner, with a full-access key: `deposit_budget({"max_price": "<yocto>",
+   "products": ["<key>", ...]})` with the NEAR to deposit (an empty list
+   allows all products), then adds a function-call key for the methods
+   `buy_from_budget` and `add_device_from_budget` on the license contract.
+2. The agent, with that key:
+   - `buy_from_budget({"product": "<key>"})` returns the new license.
+   - `add_device_from_budget({"token_id": "<id>", "device_id": "<device_id>"})`
+     registers the computer that the agent runs on. Compute `device_id` on
+     that computer, as above.
+3. The owner can `withdraw_budget({"amount": "<yocto>"})` (or no amount: all)
+   with 1 yoctoNEAR attached. The function-call key cannot withdraw, list or
+   sell.
+
+No presence check is needed here: it stops a link from another person, and
+here the owner's key signs on the computer that gets the seat. Sign the
+transaction as NEAR does: the borsh `Transaction` with one `FunctionCall`
+action (no deposit), signed with ed25519 over its SHA-256, sent with
+`send_tx`.
+
 ## RPC
 
 Use `https` RPC endpoints only; refuse plain `http` except for loopback
