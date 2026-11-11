@@ -210,12 +210,21 @@ pub enum Error {
     TimedOut,
     /// A local file or program failed (for example the browser).
     Io(String),
+    /// A transaction was sent, but its result is unknown (a time-out or a
+    /// lost connection). It can still succeed: check the result (for
+    /// example `licenses_for_owner`) before you send it again.
+    Unconfirmed {
+        /// The transaction hash, base58.
+        tx_hash: String,
+    },
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Error::NoMachineId => f.write_str("cannot read the machine id of this computer"),
+            Error::NoMachineId => f.write_str(
+                "cannot read the machine id of this computer. Run this on the computer that will run the program: a container or a cloud sandbox often has no machine id",
+            ),
             Error::Network(e) => write!(f, "cannot reach the NEAR RPC endpoint: {e}"),
             Error::Rpc(e) => write!(f, "NEAR RPC error: {e}"),
             Error::LicenseEnded { token_id } => write!(
@@ -225,6 +234,10 @@ impl std::fmt::Display for Error {
             Error::Stopped => f.write_str("stopped waiting for the registration"),
             Error::TimedOut => f.write_str("the registration did not arrive in time"),
             Error::Io(e) => f.write_str(e),
+            Error::Unconfirmed { tx_hash } => write!(
+                f,
+                "transaction {tx_hash} was sent, but its result is unknown. Check the result before you try again: it can still succeed"
+            ),
         }
     }
 }
@@ -440,20 +453,32 @@ impl Client {
 
     // ----- Agents: no browser -----
 
-    /// The newest official build that has a file for `platform` (see
-    /// [`platform`]), or `None`.
+    /// The last recorded official build that has a file for `platform` (see
+    /// [`platform`]), or `None`. The release records its main download for
+    /// each platform first, and this is that file.
     pub fn latest_build(&self, platform: &str) -> Result<Option<ArtifactMatch>, Error> {
-        rpc::view(
+        let found: Option<ArtifactMatch> = rpc::view(
             &self.product.rpc_url,
             &self.product.contract,
             "latest_build",
             serde_json::json!({ "product": self.product.key, "platform": platform }),
-        )
+        )?;
+        if let Some(m) = &found {
+            if m.artifact.platform != platform {
+                return Err(Error::Rpc(
+                    "the record is for another platform than the one asked for".into(),
+                ));
+            }
+        }
+        Ok(found)
     }
 
-    /// Downloads the newest official file for `platform` into `dir`, and
-    /// checks that its SHA-256 is the recorded one. Returns the path and the
-    /// record. A file with another SHA-256 is deleted and refused.
+    /// Downloads the last recorded official file for `platform` into `dir`,
+    /// and checks that its SHA-256 is the recorded one. Returns the path and
+    /// the record. The file is written to a temporary name and gets its own
+    /// name only after the check, so a failed or changed download never
+    /// replaces a file. The check trusts the RPC endpoint and the contract of
+    /// this client.
     pub fn download_latest(
         &self,
         platform: &str,
@@ -472,76 +497,128 @@ impl Client {
         }
         let name = std::path::Path::new(&m.artifact.file)
             .file_name()
-            .ok_or_else(|| Error::Io("the record has no file name".into()))?;
-        let path = dir.join(name);
-        let resp = ureq::get(&url)
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Error::Io("the record has no file name".into()))?
+            .to_string();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(15))
+            .timeout_read(Duration::from_secs(60))
+            .redirects(5)
+            .build();
+        let resp = agent
+            .get(&url)
             .call()
             .map_err(|e| Error::Network(e.to_string()))?;
-        let mut file = std::fs::File::create(&path).map_err(|e| Error::Io(e.to_string()))?;
-        std::io::copy(&mut resp.into_reader(), &mut file).map_err(|e| Error::Io(e.to_string()))?;
-        drop(file);
-        let got = sha256_file(&path).map_err(|e| Error::Io(e.to_string()))?;
-        if got != m.artifact.sha256.to_ascii_lowercase() {
-            let _ = std::fs::remove_file(&path);
-            return Err(Error::Io(format!(
-                "the download has SHA-256 {got}, not the recorded {}",
-                m.artifact.sha256
-            )));
+        if !resp.get_url().starts_with("https://") {
+            return Err(Error::Io(
+                "the download was redirected away from https".into(),
+            ));
         }
+        let path = save_checked(
+            resp.into_reader(),
+            dir,
+            &name,
+            &m.artifact.sha256,
+            MAX_DOWNLOAD,
+        )?;
         Ok((path, m))
     }
 
+    /// The agent budget of `account_id`, or `None`.
+    pub fn budget(&self, account_id: &str) -> Result<Option<AgentBudget>, Error> {
+        rpc::view(
+            &self.product.rpc_url,
+            &self.product.contract,
+            "get_budget",
+            serde_json::json!({ "account_id": account_id }),
+        )
+    }
+
+    /// The licenses of this product that `account_id` owns.
+    pub fn licenses_of(&self, account_id: &str) -> Result<Vec<OwnedLicense>, Error> {
+        rpc::view(
+            &self.product.rpc_url,
+            &self.product.contract,
+            "licenses_for_owner",
+            serde_json::json!({ "account_id": account_id, "product": self.product.key }),
+        )
+    }
+
     /// Buys a license of this product for the key's account, paid from the
-    /// account's agent budget (`deposit_budget`). `key` can be a
-    /// function-call key for the methods `buy_from_budget` and
-    /// `add_device_from_budget`. Returns the token id.
-    pub fn buy_with_key(&self, key: &KeyFile) -> Result<String, Error> {
+    /// account's agent budget (`deposit_budget`). `key` must be a
+    /// function-call key for `buy_from_budget` and `add_device_from_budget`
+    /// only. When the account already owns a license of this product whose
+    /// update period has not ended, nothing is sent and that license comes
+    /// back with `new: false`, so running this twice buys one license.
+    pub fn buy_with_key(&self, key: &KeyFile) -> Result<Purchase, Error> {
+        let account = key_account(key)?;
+        let now = now_ms();
+        if let Some(l) = self
+            .licenses_of(account)?
+            .into_iter()
+            .find(|l| l.updates_until_ms > now)
+        {
+            return Ok(Purchase {
+                token_id: l.token_id,
+                new: false,
+            });
+        }
+        #[derive(Deserialize)]
+        struct P {
+            price: String,
+        }
+        let p: Option<P> = rpc::view(
+            &self.product.rpc_url,
+            &self.product.contract,
+            "get_product",
+            serde_json::json!({ "key": self.product.key }),
+        )?;
+        let price = p
+            .ok_or_else(|| Error::Rpc("the product does not exist".into()))?
+            .price;
         let v = tx::call(
             &self.product.rpc_url,
             key,
             &self.product.contract,
             "buy_from_budget",
-            &serde_json::json!({ "product": self.product.key }),
+            &serde_json::json!({ "product": self.product.key, "price": price }),
         )?;
-        v["token_id"]
+        let token_id = v["token_id"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| Error::Rpc("the reply has no token id".into()))
+            .ok_or_else(|| Error::Rpc("the reply has no token id".into()))?;
+        Ok(Purchase {
+            token_id,
+            new: true,
+        })
     }
 
     /// Registers this computer on a license of the key's account, with no
     /// browser, and pays the storage from the account's agent budget.
-    /// `token_id` picks the license; with `None`, the first license of this
-    /// product with a free seat. Returns the token id. If this computer
-    /// already has a seat on a license of the account, returns that one.
+    /// `token_id` picks the license; with `None`, a license of this product
+    /// with a free seat whose update period has not ended. If this computer
+    /// already has a seat on that license (or, with `None`, on any license
+    /// of the account), returns it and sends nothing.
     ///
-    /// The presence check of the register page is not needed here: it stops
-    /// a link from another person, and here the owner's own key signs on
-    /// this computer.
+    /// The seat is for the computer that runs this: the computer id comes
+    /// from its machine id. Run it on the computer that will run the
+    /// program, not in a container or a cloud sandbox.
     pub fn register_with_key(
         &self,
         key: &KeyFile,
         token_id: Option<&str>,
     ) -> Result<String, Error> {
-        if key.account_id.is_empty() {
-            return Err(Error::Io(
-                "the key file has no account_id: give the account of the key".into(),
-            ));
-        }
+        let account = key_account(key)?;
         let device = self.device_id()?.to_string();
-        #[derive(Deserialize)]
-        struct Lic {
-            token_id: String,
-            devices: Vec<String>,
-        }
-        let licenses: Vec<Lic> = rpc::view(
-            &self.product.rpc_url,
-            &self.product.contract,
-            "licenses_for_owner",
-            serde_json::json!({ "account_id": key.account_id, "product": self.product.key }),
-        )?;
+        let licenses = self.licenses_of(account)?;
         if let Some(l) = licenses.iter().find(|l| l.devices.contains(&device)) {
-            return Ok(l.token_id.clone());
+            return match token_id {
+                Some(t) if t != l.token_id => Err(Error::Io(format!(
+                    "this computer has a seat on {} already; remove it there first",
+                    l.token_id
+                ))),
+                _ => Ok(l.token_id.clone()),
+            };
         }
         let token = match token_id {
             Some(t) => t.to_string(),
@@ -559,14 +636,16 @@ impl Client {
                 let max = p
                     .ok_or_else(|| Error::Rpc("the product does not exist".into()))?
                     .max_devices;
+                let now = now_ms();
                 licenses
                     .iter()
-                    .find(|l| l.devices.len() < max)
+                    .filter(|l| l.devices.len() < max && l.updates_until_ms > now)
+                    .max_by_key(|l| l.updates_until_ms)
                     .map(|l| l.token_id.clone())
                     .ok_or_else(|| {
-                        Error::Rpc(format!(
-                            "{} has no license of {} with a free seat",
-                            key.account_id, self.product.key
+                        Error::Io(format!(
+                            "{account} has no license of {} with a free seat; buy one or ask the owner to remove a computer",
+                            self.product.key
                         ))
                     })?
             }
@@ -648,9 +727,118 @@ fn open_url(url: &str) -> Result<(), Error> {
         .map_err(|e| Error::Io(format!("cannot open {url}: {e}")))
 }
 
+/// The largest download that `download_latest` accepts: 2 GiB.
+const MAX_DOWNLOAD: u64 = 2 << 30;
+
+/// The result of [`Client::buy_with_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Purchase {
+    /// The license token id, for example `checksum:1`.
+    pub token_id: String,
+    /// False when the account owned the license already and nothing was sent.
+    pub new: bool,
+}
+
+/// An agent budget, as `get_budget` returns it. NEAR amounts are yoctoNEAR.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+pub struct AgentBudget {
+    /// The NEAR left, in yoctoNEAR.
+    pub balance: String,
+    /// The highest price of one license, in yoctoNEAR.
+    pub max_price: String,
+    /// The products that the budget can buy.
+    pub products: Vec<String>,
+}
+
+/// A license of the product, as `licenses_for_owner` returns it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OwnedLicense {
+    /// The token id.
+    pub token_id: String,
+    /// The end of the update period (Unix ms).
+    pub updates_until_ms: u64,
+    /// The computer ids with a seat.
+    pub devices: Vec<String>,
+}
+
+fn key_account(key: &KeyFile) -> Result<&str, Error> {
+    if key.account_id().is_empty() {
+        return Err(Error::Io(
+            "the key file has no account_id: give the account of the key".into(),
+        ));
+    }
+    Ok(key.account_id())
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Writes `reader` to a new temporary file in `dir`, at most `limit` bytes,
+/// and renames it to `name` only when its SHA-256 is `sha256`. Removes the
+/// temporary file on every failure.
+fn save_checked(
+    mut reader: impl std::io::Read,
+    dir: &std::path::Path,
+    name: &str,
+    sha256: &str,
+    limit: u64,
+) -> Result<std::path::PathBuf, Error> {
+    use std::io::Write;
+    let mut raw = [0u8; 8];
+    getrandom::getrandom(&mut raw).map_err(|e| Error::Io(format!("no random source: {e}")))?;
+    let tmp = dir.join(format!(".{name}.{}.part", hex::encode(raw)));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|e| Error::Io(format!("cannot write {}: {e}", tmp.display())))?;
+        let mut h = Sha256::new();
+        let mut buf = vec![0u8; 1 << 16];
+        let mut total = 0u64;
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| Error::Network(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+            if total > limit {
+                return Err(Error::Io(format!(
+                    "the download is larger than {limit} bytes"
+                )));
+            }
+            h.update(&buf[..n]);
+            file.write_all(&buf[..n])
+                .map_err(|e| Error::Io(e.to_string()))?;
+        }
+        file.sync_all().map_err(|e| Error::Io(e.to_string()))?;
+        let got = hex::encode(h.finalize());
+        if got != sha256.to_ascii_lowercase() {
+            return Err(Error::Io(format!(
+                "the download has SHA-256 {got}, not the recorded {sha256}"
+            )));
+        }
+        let path = dir.join(name);
+        std::fs::rename(&tmp, &path).map_err(|e| Error::Io(e.to_string()))?;
+        Ok(path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
 
     /// A 64-hex computer id: 6844b8b0, 52 zeros, af75.
     fn dev() -> String {
@@ -661,6 +849,177 @@ mod tests {
         let product =
             Product::testnet("licenses.builddeed.testnet", "doom", "0.2.0").with_rpc_url(url);
         Client::with_device(product, dev())
+    }
+
+    // ----- Agents -----
+
+    fn agent_key() -> KeyFile {
+        let k = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let mut both = [9u8; 32].to_vec();
+        both.extend_from_slice(k.verifying_key().as_bytes());
+        KeyFile::parse(
+            &serde_json::json!({
+                "account_id": "owner.testnet",
+                "public_key": format!("ed25519:{}", bs58::encode(k.verifying_key().as_bytes()).into_string()),
+                "private_key": format!("ed25519:{}", bs58::encode(&both).into_string()),
+            })
+            .to_string(),
+        )
+        .unwrap()
+    }
+
+    fn access_key(permission: serde_json::Value) -> (u16, String) {
+        fake_rpc::ok(serde_json::json!({
+            "nonce": 5, "permission": permission,
+            "block_hash": bs58::encode([3u8; 32]).into_string(),
+        }))
+    }
+
+    fn agent_permission() -> serde_json::Value {
+        serde_json::json!({"FunctionCall": {"allowance": "1", "receiver_id": "licenses.builddeed.testnet",
+            "method_names": ["buy_from_budget", "add_device_from_budget"]}})
+    }
+
+    fn license(token: &str, until: u64, devices: &[String]) -> serde_json::Value {
+        serde_json::json!({"token_id": token, "product": "doom", "owner_id": "owner.testnet",
+            "purchased_at_ms": 1, "updates_until_ms": until, "listed_price": null, "devices": devices})
+    }
+
+    const FUTURE: u64 = 4_000_000_000_000;
+
+    #[test]
+    fn buy_sends_nothing_when_a_license_is_owned() {
+        let url = fake_rpc::serve(vec![fake_rpc::view(serde_json::json!([license(
+            "doom:1",
+            FUTURE,
+            &[]
+        )]))]);
+        let p = client(url).buy_with_key(&agent_key()).unwrap();
+        assert_eq!(
+            p,
+            Purchase {
+                token_id: "doom:1".into(),
+                new: false
+            }
+        );
+    }
+
+    #[test]
+    fn buy_passes_the_price_and_returns_the_new_token() {
+        let ret = B64.encode(br#"{"token_id":"doom:2"}"#);
+        let url = fake_rpc::serve(vec![
+            fake_rpc::view(serde_json::json!([license("doom:1", 1, &[])])),
+            fake_rpc::view(serde_json::json!({"price": "100"})),
+            access_key(agent_permission()),
+            fake_rpc::ok(serde_json::json!({"status": {"SuccessValue": ret}})),
+        ]);
+        let p = client(url).buy_with_key(&agent_key()).unwrap();
+        assert_eq!(
+            p,
+            Purchase {
+                token_id: "doom:2".into(),
+                new: true
+            }
+        );
+    }
+
+    #[test]
+    fn buy_refuses_a_full_access_key() {
+        let url = fake_rpc::serve(vec![
+            fake_rpc::view(serde_json::json!([])),
+            fake_rpc::view(serde_json::json!({"price": "100"})),
+            access_key(serde_json::json!("FullAccess")),
+        ]);
+        let e = client(url).buy_with_key(&agent_key()).unwrap_err();
+        assert!(e.to_string().contains("full-access"), "{e}");
+    }
+
+    #[test]
+    fn a_timed_out_buy_is_unconfirmed_with_its_hash() {
+        let url = fake_rpc::serve(vec![
+            fake_rpc::view(serde_json::json!([])),
+            fake_rpc::view(serde_json::json!({"price": "100"})),
+            access_key(agent_permission()),
+            fake_rpc::error("TIMEOUT_ERROR"),
+        ]);
+        match client(url).buy_with_key(&agent_key()) {
+            Err(Error::Unconfirmed { tx_hash }) => assert!(tx_hash.len() > 30, "{tx_hash}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_returns_the_seat_it_has_and_refuses_another_license() {
+        let seated = serde_json::json!([license("doom:1", FUTURE, &[dev()])]);
+        let url = fake_rpc::serve(vec![fake_rpc::view(seated.clone())]);
+        assert_eq!(
+            client(url).register_with_key(&agent_key(), None).unwrap(),
+            "doom:1"
+        );
+        let url = fake_rpc::serve(vec![fake_rpc::view(seated)]);
+        let e = client(url)
+            .register_with_key(&agent_key(), Some("doom:2"))
+            .unwrap_err();
+        assert!(e.to_string().contains("doom:1"), "{e}");
+    }
+
+    #[test]
+    fn register_picks_a_current_license_with_a_free_seat() {
+        let full: Vec<String> = (0..3).map(|i| format!("{i:064}")).collect();
+        let url = fake_rpc::serve(vec![
+            fake_rpc::view(serde_json::json!([
+                license("doom:1", FUTURE, &full),
+                license("doom:2", 1, &[]),
+                license("doom:3", FUTURE, &[]),
+            ])),
+            fake_rpc::view(serde_json::json!({"max_devices": 3})),
+            access_key(agent_permission()),
+            fake_rpc::ok(serde_json::json!({"status": {"SuccessValue": ""}})),
+        ]);
+        assert_eq!(
+            client(url).register_with_key(&agent_key(), None).unwrap(),
+            "doom:3"
+        );
+    }
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("builddeed-test-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn sha_of(b: &[u8]) -> String {
+        hex::encode(Sha256::digest(b))
+    }
+
+    #[test]
+    fn a_checked_download_gets_its_name() {
+        let d = tmp_dir("ok");
+        let p = save_checked(&b"good"[..], &d, "app", &sha_of(b"good"), 100).unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"good");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_bad_or_broken_download_never_replaces_a_file() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("reset"))
+            }
+        }
+        let d = tmp_dir("bad");
+        std::fs::write(d.join("app"), b"good").unwrap();
+        assert!(save_checked(&b"evil"[..], &d, "app", &sha_of(b"good"), 100).is_err());
+        assert!(save_checked(Broken, &d, "app", &sha_of(b"good"), 100).is_err());
+        assert!(save_checked(&b"good"[..], &d, "app", &sha_of(b"good"), 3).is_err());
+        assert_eq!(std::fs::read(d.join("app")).unwrap(), b"good");
+        assert_eq!(
+            std::fs::read_dir(&d).unwrap().count(),
+            1,
+            "no temporary file is left"
+        );
     }
 
     #[test]

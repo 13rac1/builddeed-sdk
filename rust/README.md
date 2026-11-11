@@ -33,30 +33,33 @@ website.
 
 | Call | What it does |
 | --- | --- |
-| `Client::new(product)` | Computes this computer's id: SHA-256 of the OS machine id and the contract name. |
+| `Client::new(product)` | Computes this computer's id: SHA-256 of the OS machine id, the contract name and the product key. |
 | `check()` | The seat of this computer on a license that covers this version, or `None`. One view call. |
 | `status()` | Like `check()`, and tells "license ended, renew" apart from "no seat". |
-| `device_id_from(contract, machine_id)` | The computer id rule of the spec, for tests and tools. |
+| `device_id_from(contract, product, machine_id)` | The computer id rule of the spec, for tests and tools. |
 | `register_url()`, `open_register_page()` | The BuildDeed register page for this computer; `open_register_page` adds the presence check. |
 | `confirm_code()` | The 6-digit code to show while the register page is open. The page asks for it when the browser blocks the presence check. |
 | `buy_url()`, `open_buy_page()` | The buy page of the product. |
 | `wait_for_seat(stop, every, max)` | Polls until the seat is there, `stop` is set, or `max` passes. |
 | `find_artifact(sha256)` | The official build record of a file. |
 | `verify_self()` | The record of the running program; `None` for a self-built copy. |
-| `latest_build(platform)`, `download_latest(platform, dir)` | The newest official file for a platform; the download is refused unless its SHA-256 is the recorded one. |
-| `KeyFile::load(path)`, `buy_with_key(key)`, `register_with_key(key, token)` | Buy and register with a function-call key and the owner's agent budget, with no browser. |
+| `latest_build(platform)`, `download_latest(platform, dir)` | The last recorded official file for a platform. The download goes to a temporary name and gets its name only when its SHA-256 is the recorded one. |
+| `KeyFile::load(path)`, `buy_with_key(key)`, `register_with_key(key, token)`, `budget(account)`, `licenses_of(account)` | Buy and register with an agent key and the owner's agent budget, with no browser. `buy_with_key` sends nothing when the account owns a license already. A key that is not an agent key for the contract is refused. |
 
 ### Command line, for agents and CI
 
 ```sh
-cargo install --git https://github.com/13rac1/builddeed-sdk builddeed --bin builddeed
-builddeed --product doom buy --key key.json        # {"token_id": "doom:1", ...}
-builddeed --product doom register --key key.json   # a seat for this computer
-builddeed --product doom download --out .          # newest official file, SHA-256 checked
-builddeed --product doom status
+cargo install --locked --git https://github.com/13rac1/builddeed-sdk --tag rust-v0.1.0 builddeed --bin builddeed
+builddeed --product checksum budget --key key.json     # the budget and the licenses
+builddeed --product checksum buy --key key.json        # {"token_id": "checksum:1", "bought": true, ...}
+builddeed --product checksum register --key key.json   # a seat for THIS computer
+builddeed --product checksum download --out .          # the official file, SHA-256 checked
+builddeed --product checksum status
 ```
 
 Every command prints one JSON object and exits with 0, or 1 and `{"error": ...}`.
+After a sent transaction with an unknown result, the error has `unconfirmed_tx`:
+check `budget` before you run the command again. `--help` prints the commands.
 
 `--key` takes a NEAR key file. A file in `~/.near-credentials/<network>/<account>/`
 names its account by the folder; for a key file elsewhere, add `--account <id>`.

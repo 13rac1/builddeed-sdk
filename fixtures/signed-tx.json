@@ -1,0 +1,10 @@
+{
+  "comment": "A signed transaction that near-cli-rs 0.30 made (display, not sent): buy_from_budget with 100 Tgas and no deposit. An SDK must encode the same transaction bytes from the same fields, and the signature must verify with the public key over SHA-256 of those bytes. The nonce and block hash are read from the bytes.",
+  "signed_tx_base64": "GAAAAGJkLWFnZW50LW93bmVyLTEudGVzdG5ldABoIx1FHNnu1DI7PT3w5DWQOZpORzWau70fjBh3npV5oQMjkWUl/AAAGgAAAGxpY2Vuc2VzLmJ1aWxkZGVlZC50ZXN0bmV01QDtWuQtfXg/8epU4tkE/D9Vb96iJouHzDMCr3TTAmkBAAAAAg8AAABidXlfZnJvbV9idWRnZXQ5AAAAeyJwcmljZSI6IjEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInByb2R1Y3QiOiJjaGVja3N1bSJ9AEB6EPNaAAAAAAAAAAAAAAAAAAAAAAAAAHP+SNhM9Tmt5AFl3pU1DmxftxBUSopv8okgGP3/EEL5UD2q7gvGrlLBkTW72DX2NnMNOaXJojoHMyE4+ScJwQU=",
+  "signer": "bd-agent-owner-1.testnet",
+  "public_key": "ed25519:81WTSXVfpuCmcHKpwz4LkXZAxYGBFkGdgWAbeCRWNSfi",
+  "receiver": "licenses.builddeed.testnet",
+  "method": "buy_from_budget",
+  "args": "{\"price\":\"100000000000000000000000\",\"product\":\"checksum\"}",
+  "gas": 100000000000000
+}

@@ -25,14 +25,20 @@ const GAS: u64 = 100_000_000_000_000;
 /// `{"account_id": "...", "public_key": "ed25519:...", "private_key": "ed25519:..."}`.
 /// A key file in `~/.near-credentials/<network>/<account>/` has no
 /// `account_id`; [`KeyFile::load`] then takes the account from the folder
-/// name.
-#[derive(Clone, Deserialize)]
+/// name. The private key is checked against the public key when the file is
+/// read, and it is never printed.
+#[derive(Clone)]
 pub struct KeyFile {
-    /// The account that the key belongs to.
+    account_id: String,
+    signing: SigningKey,
+}
+
+/// The JSON of a key file, before its check.
+#[derive(Deserialize)]
+struct RawKeyFile {
     #[serde(default)]
-    pub account_id: String,
-    /// `ed25519:` and the base58 public key.
-    pub public_key: String,
+    account_id: String,
+    public_key: String,
     private_key: String,
 }
 
@@ -41,7 +47,7 @@ impl std::fmt::Debug for KeyFile {
         // Never print the private key.
         f.debug_struct("KeyFile")
             .field("account_id", &self.account_id)
-            .field("public_key", &self.public_key)
+            .field("public_key", &self.public_key())
             .finish_non_exhaustive()
     }
 }
@@ -59,7 +65,7 @@ impl KeyFile {
                 .parent()
                 .and_then(|d| d.file_name())
                 .and_then(|n| n.to_str())
-                .filter(|n| n.contains('.') || n.len() == 64)
+                .filter(|n| is_account_id(n))
             {
                 k.account_id = name.to_string();
             }
@@ -73,27 +79,51 @@ impl KeyFile {
         self
     }
 
+    /// The account of the key; empty when the file does not name it.
+    pub fn account_id(&self) -> &str {
+        &self.account_id
+    }
+
+    /// `ed25519:` and the base58 public key.
+    pub fn public_key(&self) -> String {
+        format!(
+            "ed25519:{}",
+            bs58::encode(self.signing.verifying_key().as_bytes()).into_string()
+        )
+    }
+
     /// Parses the JSON of a key file and checks that the private key matches
     /// the public key.
     pub fn parse(json: &str) -> Result<Self, Error> {
-        let k: KeyFile = serde_json::from_str(json)
+        let raw: RawKeyFile = serde_json::from_str(json)
             .map_err(|e| Error::Io(format!("not a NEAR key file: {e}")))?;
-        let signing = k.signing_key()?;
-        let public = decode_key(&k.public_key, 32)?;
+        // near-cli writes the 64-byte form: the secret, then the public key.
+        let private = decode_key(&raw.private_key, 64)?;
+        let secret: [u8; 32] = private[..32].try_into().expect("64 bytes checked");
+        let signing = SigningKey::from_bytes(&secret);
+        let public = decode_key(&raw.public_key, 32)?;
         if signing.verifying_key().as_bytes()[..] != public[..] {
             return Err(Error::Io(
                 "the private key of the key file does not match its public key".into(),
             ));
         }
-        Ok(k)
+        Ok(KeyFile {
+            account_id: raw.account_id,
+            signing,
+        })
     }
+}
 
-    fn signing_key(&self) -> Result<SigningKey, Error> {
-        // near-cli writes the 64-byte form: the secret, then the public key.
-        let raw = decode_key(&self.private_key, 64)?;
-        let secret: [u8; 32] = raw[..32].try_into().expect("64 bytes checked");
-        Ok(SigningKey::from_bytes(&secret))
-    }
+/// A NEAR account id as a folder name: a named account (with a dot, lowercase
+/// letters, digits, `-`, `_`) or a 64-hex implicit account.
+fn is_account_id(s: &str) -> bool {
+    (2..=64).contains(&s.len())
+        && s.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+        })
+        && (s.contains('.') || (s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())))
+        && !s.starts_with('.')
+        && !s.ends_with('.')
 }
 
 /// Decodes `ed25519:<base58>` to `len` bytes.
@@ -113,39 +143,45 @@ fn decode_key(text: &str, len: usize) -> Result<Vec<u8>, Error> {
     Ok(raw)
 }
 
-/// The borsh bytes of a `Transaction` with one `FunctionCall` action and no
-/// deposit.
-#[allow(clippy::too_many_arguments)]
+/// The fixed parts of a transaction: who signs, with which key, for which
+/// contract.
+pub(crate) struct Header<'a> {
+    pub signer: &'a str,
+    pub public_key: [u8; 32],
+    pub receiver: &'a str,
+}
+
+/// The borsh bytes of a `Transaction` with one `FunctionCall` action, [`GAS`]
+/// and no deposit.
 pub(crate) fn encode_call(
-    signer: &str,
-    public_key: &[u8; 32],
+    h: &Header,
     nonce: u64,
-    receiver: &str,
     block_hash: &[u8; 32],
     method: &str,
     args: &[u8],
-    gas: u64,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
-    put_str(&mut out, signer);
+    put_bytes(&mut out, h.signer.as_bytes())?;
     out.push(0); // KeyType::ED25519
-    out.extend_from_slice(public_key);
+    out.extend_from_slice(&h.public_key);
     out.extend_from_slice(&nonce.to_le_bytes());
-    put_str(&mut out, receiver);
+    put_bytes(&mut out, h.receiver.as_bytes())?;
     out.extend_from_slice(block_hash);
     out.extend_from_slice(&1u32.to_le_bytes()); // one action
     out.push(2); // Action::FunctionCall
-    put_str(&mut out, method);
-    out.extend_from_slice(&(args.len() as u32).to_le_bytes());
-    out.extend_from_slice(args);
-    out.extend_from_slice(&gas.to_le_bytes());
+    put_bytes(&mut out, method.as_bytes())?;
+    put_bytes(&mut out, args)?;
+    out.extend_from_slice(&GAS.to_le_bytes());
     out.extend_from_slice(&0u128.to_le_bytes()); // deposit
-    out
+    Ok(out)
 }
 
-fn put_str(out: &mut Vec<u8>, s: &str) {
-    out.extend_from_slice(&(s.len() as u32).to_le_bytes());
-    out.extend_from_slice(s.as_bytes());
+/// A borsh string or byte vector: u32 length, then the bytes.
+fn put_bytes(out: &mut Vec<u8>, b: &[u8]) -> Result<(), Error> {
+    let len = u32::try_from(b.len()).map_err(|_| Error::Io("an argument is too long".into()))?;
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(b);
+    Ok(())
 }
 
 /// Signs a transaction: its borsh bytes, then the ed25519 signature of their
@@ -159,9 +195,43 @@ pub(crate) fn sign(tx: &[u8], key: &SigningKey) -> Vec<u8> {
     out
 }
 
+/// The methods that an agent key may call. A key that allows any other
+/// method, or all methods, is refused: an agent must not hold it.
+pub(crate) const AGENT_METHODS: [&str; 2] = ["buy_from_budget", "add_device_from_budget"];
+
+/// Refuses an access key that is not an agent key for `contract`: a
+/// full-access key, a key for another contract, or a key that allows other
+/// methods.
+fn check_agent_key(permission: &Value, contract: &str) -> Result<(), Error> {
+    let fc = permission.get("FunctionCall").ok_or_else(|| {
+        Error::Io(
+            "this is a full-access key: give the agent a function-call key for buy_from_budget and add_device_from_budget".into(),
+        )
+    })?;
+    if fc["receiver_id"].as_str() != Some(contract) {
+        return Err(Error::Io(format!(
+            "this key is for {}, not for {contract}",
+            fc["receiver_id"]
+        )));
+    }
+    let methods: Vec<&str> = fc["method_names"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if methods.is_empty() || methods.iter().any(|m| !AGENT_METHODS.contains(m)) {
+        return Err(Error::Io(
+            "this key allows other methods: give the agent a key for buy_from_budget and add_device_from_budget only".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Calls `method` on `contract` with `args`, signed with `key`, and waits
 /// until the transaction is final. Returns the JSON value that the method
-/// returns. A refused call returns its error message as [`Error::Rpc`].
+/// returns. A refused call returns its error message as [`Error::Rpc`]. When
+/// the transaction was sent but its result is unknown (a time-out or a lost
+/// connection), returns [`Error::Unconfirmed`] with its hash: do not send it
+/// again before you check the result.
 pub(crate) fn call(
     rpc_url: &str,
     key: &KeyFile,
@@ -174,39 +244,46 @@ pub(crate) fn call(
             "the key file has no account_id: give the account of the key".into(),
         ));
     }
-    let signing = key.signing_key()?;
-    let public: [u8; 32] = signing.verifying_key().to_bytes();
     let access = rpc::post(
         rpc_url,
         json!({"jsonrpc": "2.0", "id": "builddeed", "method": "query", "params": {
             "request_type": "view_access_key", "finality": "final",
-            "account_id": key.account_id, "public_key": key.public_key}}),
+            "account_id": key.account_id, "public_key": key.public_key()}}),
     )?;
+    check_agent_key(&access["permission"], contract)?;
     let nonce = access["nonce"]
         .as_u64()
         .ok_or_else(|| Error::Rpc("the access key has no nonce".into()))?;
-    let hash = bs58::decode(access["block_hash"].as_str().unwrap_or(""))
+    let block_hash = bs58::decode(access["block_hash"].as_str().unwrap_or(""))
         .into_vec()
         .ok()
         .and_then(|v| <[u8; 32]>::try_from(v).ok())
         .ok_or_else(|| Error::Rpc("the reply has no block hash".into()))?;
+    let header = Header {
+        signer: &key.account_id,
+        public_key: key.signing.verifying_key().to_bytes(),
+        receiver: contract,
+    };
     let tx = encode_call(
-        &key.account_id,
-        &public,
+        &header,
         nonce + 1,
-        contract,
-        &hash,
+        &block_hash,
         method,
         args.to_string().as_bytes(),
-        GAS,
-    );
-    let signed = sign(&tx, &signing);
-    let result = rpc::post(
+    )?;
+    let tx_hash = bs58::encode(Sha256::digest(&tx)).into_string();
+    let signed = sign(&tx, &key.signing);
+    let sent = rpc::post(
         rpc_url,
         json!({"jsonrpc": "2.0", "id": "builddeed", "method": "send_tx", "params": {
             "signed_tx_base64": B64.encode(&signed), "wait_until": "FINAL"}}),
-    )?;
-    outcome(&result)
+    );
+    match sent {
+        Ok(result) => outcome(&result),
+        Err(Error::Network(_)) => Err(Error::Unconfirmed { tx_hash }),
+        Err(Error::Rpc(m)) if m.contains("TIMEOUT_ERROR") => Err(Error::Unconfirmed { tx_hash }),
+        Err(e) => Err(e),
+    }
 }
 
 /// The return value of a final transaction, or its failure as an error.
@@ -259,9 +336,10 @@ mod tests {
     fn key_file_parses_and_hides_the_private_key() {
         let (json, k) = test_key();
         let f = KeyFile::parse(&json).unwrap();
-        assert_eq!(f.account_id, "agent.testnet");
-        assert_eq!(f.signing_key().unwrap().to_bytes(), k.to_bytes());
-        assert!(!format!("{f:?}").contains("private"));
+        assert_eq!(f.account_id(), "agent.testnet");
+        assert_eq!(f.signing.to_bytes(), k.to_bytes());
+        assert!(f.public_key().starts_with("ed25519:"));
+        assert!(!format!("{f:?}").contains("signing"));
     }
 
     #[test]
@@ -275,8 +353,25 @@ mod tests {
     }
 
     #[test]
+    fn account_folder_names() {
+        assert!(is_account_id("alice.testnet"));
+        assert!(is_account_id(&"a".repeat(64)));
+        assert!(!is_account_id("keys.d."));
+        assert!(!is_account_id("agent"));
+        assert!(!is_account_id("Alice.testnet"));
+    }
+
+    fn header() -> Header<'static> {
+        Header {
+            signer: "a",
+            public_key: [1; 32],
+            receiver: "c",
+        }
+    }
+
+    #[test]
     fn call_encoding_matches_borsh_layout() {
-        let tx = encode_call("a", &[1; 32], 5, "c", &[2; 32], "m", b"{}", 9);
+        let tx = encode_call(&header(), 5, &[2; 32], "m", b"{}").unwrap();
         let mut want = vec![1, 0, 0, 0, b'a', 0];
         want.extend([1u8; 32]);
         want.extend(5u64.to_le_bytes());
@@ -285,15 +380,60 @@ mod tests {
         want.extend([1, 0, 0, 0, 2]);
         want.extend([1, 0, 0, 0, b'm']);
         want.extend([2, 0, 0, 0, b'{', b'}']);
-        want.extend(9u64.to_le_bytes());
+        want.extend(GAS.to_le_bytes());
         want.extend([0u8; 16]);
         assert_eq!(tx, want);
+    }
+
+    /// The same bytes as near-cli-rs, and a signature that verifies the same
+    /// way: ../fixtures/signed-tx.json.
+    #[test]
+    fn encoding_matches_near_cli() {
+        let f: Value = serde_json::from_str(include_str!("../../fixtures/signed-tx.json")).unwrap();
+        let signed = B64.decode(f["signed_tx_base64"].as_str().unwrap()).unwrap();
+        let signer = f["signer"].as_str().unwrap();
+        let receiver = f["receiver"].as_str().unwrap();
+        assert_eq!(f["gas"].as_u64().unwrap(), GAS);
+        let public: [u8; 32] = decode_key(f["public_key"].as_str().unwrap(), 32)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        // Read the nonce and the block hash at their places in the bytes.
+        let at_nonce = 4 + signer.len() + 1 + 32;
+        let nonce = u64::from_le_bytes(signed[at_nonce..at_nonce + 8].try_into().unwrap());
+        let at_hash = at_nonce + 8 + 4 + receiver.len();
+        let block_hash: [u8; 32] = signed[at_hash..at_hash + 32].try_into().unwrap();
+        let h = Header {
+            signer,
+            public_key: public,
+            receiver,
+        };
+        let tx = encode_call(
+            &h,
+            nonce,
+            &block_hash,
+            f["method"].as_str().unwrap(),
+            f["args"].as_str().unwrap().as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(&signed[..tx.len()], &tx[..]);
+        assert_eq!(signed.len(), tx.len() + 1 + 64);
+        let sig = ed25519_dalek::Signature::from_slice(&signed[tx.len() + 1..]).unwrap();
+        ed25519_dalek::VerifyingKey::from_bytes(&public)
+            .unwrap()
+            .verify(&Sha256::digest(&tx), &sig)
+            .unwrap();
+        // The SDK writes the same JSON for these arguments.
+        assert_eq!(
+            json!({"product": "checksum", "price": "100000000000000000000000"}).to_string(),
+            f["args"].as_str().unwrap()
+        );
     }
 
     #[test]
     fn signature_covers_the_sha256_of_the_transaction() {
         let (_, k) = test_key();
-        let tx = encode_call("a", &[1; 32], 5, "c", &[2; 32], "m", b"{}", 9);
+        let tx = encode_call(&header(), 5, &[2; 32], "m", b"{}").unwrap();
         let signed = sign(&tx, &k);
         assert_eq!(&signed[..tx.len()], &tx[..]);
         assert_eq!(signed[tx.len()], 0);
@@ -301,6 +441,21 @@ mod tests {
         k.verifying_key()
             .verify(&Sha256::digest(&tx), &sig)
             .unwrap();
+    }
+
+    #[test]
+    fn only_an_agent_key_for_the_contract_is_used() {
+        let c = "licenses.builddeed.testnet";
+        let fc = |r: &str, m: Value| json!({"FunctionCall": {"allowance": "1", "receiver_id": r, "method_names": m}});
+        assert!(check_agent_key(&json!("FullAccess"), c).is_err());
+        assert!(check_agent_key(&fc("other.testnet", json!(["buy_from_budget"])), c).is_err());
+        assert!(check_agent_key(&fc(c, json!([])), c).is_err());
+        assert!(check_agent_key(&fc(c, json!(["buy_from_budget", "set_prices"])), c).is_err());
+        assert!(check_agent_key(
+            &fc(c, json!(["buy_from_budget", "add_device_from_budget"])),
+            c
+        )
+        .is_ok());
     }
 
     #[test]

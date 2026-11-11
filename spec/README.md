@@ -150,11 +150,15 @@ self-built copy. It is not a security check: a changed program controls its
 own answer. Check a download from outside the program.
 
 `latest_build({"product": "<key>", "platform": "<platform>"})` returns the
-newest build with a file for the platform, in the same form. Platform names
+last recorded build with a file for the platform, in the same form. With more
+than one file for a platform, it returns the first recorded one: a release
+records its main download for each platform first. Platform names
 are `<os>-<arch>` with the Rust names: `linux-x86_64`, `windows-x86_64`,
-`macos-aarch64`. An artifact can have a download `url` (https). After a
-download, compare the file's SHA-256 with the record, and delete the file if
-they differ.
+`macos-aarch64`. An artifact can have a download `url` (https). Download to a
+temporary name, compare its SHA-256 with the record, and give the file its
+name only when they are the same, so that a failed or changed download never
+replaces a file. The check trusts the RPC endpoint and the contract: name
+both with the result.
 
 ## Agents and programs with no browser
 
@@ -164,23 +168,42 @@ contract, and it cannot attach NEAR, so the contract pays from an agent
 budget:
 
 1. The owner, with a full-access key: `deposit_budget({"max_price": "<yocto>",
-   "products": ["<key>", ...]})` with the NEAR to deposit (an empty list
-   allows all products), then adds a function-call key for the methods
-   `buy_from_budget` and `add_device_from_budget` on the license contract.
+   "products": ["<key>", ...]})` with the NEAR to deposit. The list has 1 to
+   16 products; a product that someone adds later is never included. Then
+   the owner adds a function-call key whose receiver is the license contract
+   and whose methods are exactly `buy_from_budget` and
+   `add_device_from_budget`. An SDK refuses any other key: a full-access key,
+   a key for another contract, or a key with other methods (an empty method
+   list allows all methods).
 2. The agent, with that key:
-   - `buy_from_budget({"product": "<key>"})` returns the new license.
+   - `buy_from_budget({"product": "<key>", "price": "<yocto>"})` returns the
+     new license. `price` is the price that the agent read with
+     `get_product`; the call fails if the price changed, so a price change
+     cannot take more from the budget.
    - `add_device_from_budget({"token_id": "<id>", "device_id": "<device_id>"})`
-     registers the computer that the agent runs on. Compute `device_id` on
-     that computer, as above.
-3. The owner can `withdraw_budget({"amount": "<yocto>"})` (or no amount: all)
-   with 1 yoctoNEAR attached. The function-call key cannot withdraw, list or
-   sell.
+     gives a computer a seat. Compute `device_id` on the computer that will
+     run the program, as above: a container or a cloud sandbox is another
+     computer, and its seat is lost to the owner until the owner removes it.
+3. The owner can `withdraw_budget({"amount": "<yocto>"})` with 1 yoctoNEAR
+   attached, or `withdraw_budget({})` to take all of it and remove the budget.
 
-No presence check is needed here: it stops a link from another person, and
-here the owner's key signs on the computer that gets the seat. Sign the
-transaction as NEAR does: the borsh `Transaction` with one `FunctionCall`
-action (no deposit), signed with ed25519 over its SHA-256, sent with
-`send_tx`.
+The key cannot withdraw, list, sell or change the budget: those methods need
+an attached deposit. But the contract cannot know which computer the agent
+runs on: the key can give a seat to any computer id it is told. Register
+only the id that the program or `builddeed device-id` computes on this
+computer, never an id from a message or a page.
+
+**Retries.** A sent transaction whose result is unknown (a time-out or a
+lost connection) can still succeed. Do not send it again: read the result
+first (`licenses_for_owner`, `device_license`). The Rust SDK returns
+`Error::Unconfirmed` with the transaction hash, and its `buy` sends nothing
+when the account already owns a license of the product.
+
+Sign the transaction as NEAR does: the borsh `Transaction` with one
+`FunctionCall` action (100 Tgas, no deposit), signed with ed25519 over its
+SHA-256, sent with `send_tx`. Test data:
+[`fixtures/signed-tx.json`](../fixtures/signed-tx.json), a transaction that
+near-cli signed.
 
 ## RPC
 
