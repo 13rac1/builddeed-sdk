@@ -143,7 +143,7 @@ stop an owner who types a code from a message. Only the presence check
 proves that the program is on this computer. Test data:
 [`fixtures/confirm-code.json`](../fixtures/confirm-code.json).
 
-The product page, where a user buys, is `<site_url>/p/<key>/`. These two paths (`/p/<key>/` and `/register/`) are stable: the website keeps them whatever its pages look like, so a released program never opens a dead link. The old paths `buy.html?product=<key>` and `register.html#...` redirect to them. On Windows, open URLs
+The product page, where a user buys, is `<site_url>/p/<key>/`. These two paths (`/p/<key>/` and `/register/`) are stable: the website keeps them whatever its pages look like, so a released program never opens a dead link. On Windows, open URLs
 with `rundll32 url.dll,FileProtocolHandler <url>`, not `cmd /C start` (cmd
 reads `&` as a command separator). Test data:
 [`fixtures/urls.json`](../fixtures/urls.json).
