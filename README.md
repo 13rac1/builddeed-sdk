@@ -11,8 +11,8 @@ a record of official builds in the license contract.
 | [`rust/`](rust/README.md) | The Rust crate `builddeed` (feature `bevy` for a Bevy plugin). |
 | [`go/`](go/README.md) | The Go module `github.com/13rac1/builddeed-sdk/go`, standard library only. |
 
-Each SDK has its own version and tags: `rust-v0.1.0` for the Rust crate,
-`go/v0.1.0` for the Go module.
+Each SDK has its own version and tags: `rust-v0.1.1` for the Rust crate,
+`go/v0.1.1` for the Go module.
 
 ## Used by
 

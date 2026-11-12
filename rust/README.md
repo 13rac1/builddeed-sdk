@@ -9,7 +9,7 @@ contract records the SHA-256 of every official build.
 
 ```toml
 [dependencies]
-builddeed = { git = "https://github.com/13rac1/builddeed-sdk", tag = "rust-v0.1.0" }
+builddeed = { git = "https://github.com/13rac1/builddeed-sdk", tag = "rust-v0.1.1" }
 ```
 
 ```rust
@@ -49,7 +49,7 @@ website.
 ### Command line, for agents and CI
 
 ```sh
-cargo install --locked --git https://github.com/13rac1/builddeed-sdk --tag rust-v0.1.0 builddeed --bin builddeed
+cargo install --locked --git https://github.com/13rac1/builddeed-sdk --tag rust-v0.1.1 builddeed --bin builddeed
 builddeed --product checksum budget --key key.json     # the budget and the licenses
 builddeed --product checksum buy --key key.json        # {"token_id": "checksum:1", "bought": true, ...}
 builddeed --product checksum register --key key.json   # a seat for THIS computer
