@@ -165,9 +165,11 @@ self-built copy. It is not a security check: a changed program controls its
 own answer. Check a download from outside the program.
 
 `latest_build({"product": "<key>", "platform": "<platform>"})` returns the
-last recorded build with a file for the platform, in the same form. With more
-than one file for a platform, it returns the first recorded one: a release
-records its main download for each platform first. Platform names
+file for the platform in the last recorded build of the product, in the same
+form, or `null` when that build has no file for the platform. An older build
+is never offered. With more than one file for a platform, it returns the
+first recorded one: a release records its main download for each platform
+first. Platform names
 are `<os>-<arch>` with the names of Rust's `std::env::consts` (`OS`, `ARCH`):
 `linux-x86_64`, `windows-x86_64`, `macos-aarch64`, `linux-powerpc64`,
 `linux-loongarch64`. An SDK in another language maps its own names to

@@ -80,9 +80,10 @@ func (c *Client) VerifySelf(ctx context.Context) (*ArtifactMatch, error) {
 	return c.FindArtifact(ctx, sha)
 }
 
-// LatestBuild returns the last recorded official build that has a file for
-// platform, or nil. The release records its main download for each platform
-// first, and this is that file.
+// LatestBuild returns the file for platform in the last recorded official
+// build, or nil when that build has none: an older build is never offered.
+// The release records its main download for each platform first, and this is
+// that file.
 func (c *Client) LatestBuild(ctx context.Context, platform string) (*ArtifactMatch, error) {
 	var m *ArtifactMatch
 	if err := c.view(ctx, "latest_build", map[string]string{"product": c.product.Key, "platform": platform}, &m); err != nil {

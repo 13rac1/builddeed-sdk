@@ -449,8 +449,8 @@ impl Client {
 
     // ----- Agents: no browser -----
 
-    /// The last recorded official build that has a file for `platform` (see
-    /// [`platform`]), or `None`. The release records its main download for
+    /// The file for `platform` (see [`platform`]) in the last recorded
+    /// official build, or `None` when that build has none. The release records its main download for
     /// each platform first, and this is that file.
     pub fn latest_build(&self, platform: &str) -> Result<Option<ArtifactMatch>, Error> {
         let found: Option<ArtifactMatch> = rpc::view(
