@@ -16,7 +16,7 @@ NFT collection. The official BuildDeed collection on testnet is
 | `key` | `doom` | The product key in the contract (`add_product`) and on the website. |
 | `version` | `0.2.0` | The version of the running program, as the release records it with `add_build`. |
 | `rpc_url` | `https://rpc.testnet.fastnear.com` | A NEAR JSON-RPC endpoint of the contract's network. |
-| `site_url` | `https://13rac1.github.io/builddeed` | The BuildDeed website, no trailing slash. |
+| `site_url` | `https://builddeed.dev` | The BuildDeed website, no trailing slash. |
 
 ## Computer id
 
@@ -90,7 +90,7 @@ be copied or edited. With no network, the program runs unregistered.
 ## Registration
 
 1. Start the presence listener (below), then open the register page:
-   `<site_url>/register.html#product=<key>&device=<device_id>&version=<version>&port=<port>&code=<code>`
+   `<site_url>/register/#product=<key>&device=<device_id>&version=<version>&port=<port>&code=<code>`
    Percent-encode each value.
 2. The page checks the presence of the program, then the owner registers the
    computer (`add_device`, one wallet transaction).
@@ -143,7 +143,7 @@ stop an owner who types a code from a message. Only the presence check
 proves that the program is on this computer. Test data:
 [`fixtures/confirm-code.json`](../fixtures/confirm-code.json).
 
-The buy page is `<site_url>/buy.html?product=<key>`. On Windows, open URLs
+The product page, where a user buys, is `<site_url>/p/<key>/`. These two paths (`/p/<key>/` and `/register/`) are stable: the website keeps them whatever its pages look like, so a released program never opens a dead link. The old paths `buy.html?product=<key>` and `register.html#...` redirect to them. On Windows, open URLs
 with `rundll32 url.dll,FileProtocolHandler <url>`, not `cmd /C start` (cmd
 reads `&` as a command separator). Test data:
 [`fixtures/urls.json`](../fixtures/urls.json).

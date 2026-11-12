@@ -39,7 +39,7 @@ website.
 | `device_id_from(contract, product, machine_id)` | The computer id rule of the spec, for tests and tools. |
 | `register_url()`, `open_register_page()` | The BuildDeed register page for this computer; `open_register_page` adds the presence check. |
 | `confirm_code()` | The 6-digit code to show while the register page is open. The page asks for it when the browser blocks the presence check. |
-| `buy_url()`, `open_buy_page()` | The buy page of the product. |
+| `buy_url()`, `open_buy_page()` | The product page, where a user buys (`<site_url>/p/<key>/`). |
 | `wait_for_seat(stop, every, max)` | Polls until the seat is there, `stop` is set, or `max` passes. |
 | `find_artifact(sha256)` | The official build record of a file. |
 | `verify_self()` | The record of the running program; `None` for a self-built copy. |

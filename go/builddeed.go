@@ -54,7 +54,7 @@ const OfficialTestnetContract = "licenses.builddeed.testnet"
 const (
 	testnetRPCURL  = "https://rpc.testnet.fastnear.com"
 	mainnetRPCURL  = "https://rpc.mainnet.fastnear.com"
-	defaultSiteURL = "https://13rac1.github.io/builddeed"
+	defaultSiteURL = "https://builddeed.dev"
 )
 
 // RegisterWait is how long the register page can take: the presence listener
@@ -327,13 +327,13 @@ func (c *Client) RegisterURL() (string, error) {
 		return "", err
 	}
 	p := c.product
-	return p.SiteURL + "/register.html#product=" + escape(p.Key) +
+	return p.SiteURL + "/register/#product=" + escape(p.Key) +
 		"&device=" + escape(d) + "&version=" + escape(p.Version), nil
 }
 
 // BuyURL returns the website page that sells a license of the product.
 func (c *Client) BuyURL() string {
-	return c.product.SiteURL + "/buy.html?product=" + escape(c.product.Key)
+	return c.product.SiteURL + "/p/" + escape(c.product.Key) + "/"
 }
 
 // OpenRegisterPage starts the presence listener and opens the register page

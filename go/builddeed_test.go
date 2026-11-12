@@ -33,7 +33,7 @@ func mustClient(p Product, deviceID string) *Client {
 
 func TestProductDefaults(t *testing.T) {
 	p := Testnet(OfficialTestnetContract, "doom", "0.2.0")
-	if p.RPCURL != "https://rpc.testnet.fastnear.com" || p.SiteURL != "https://13rac1.github.io/builddeed" {
+	if p.RPCURL != "https://rpc.testnet.fastnear.com" || p.SiteURL != "https://builddeed.dev" {
 		t.Errorf("Testnet() = %+v", p)
 	}
 	m := Mainnet("x.near", "doom", "0.2.0")
@@ -59,7 +59,7 @@ func TestURLsEscapeEachValue(t *testing.T) {
 	if want := "#product=k%26x%3D1&device=" + testDevice + "&version=1.0%20beta"; !strings.HasSuffix(got, want) {
 		t.Errorf("RegisterURL() = %s, want suffix %s", got, want)
 	}
-	if got := c.BuyURL(); !strings.HasSuffix(got, "buy.html?product=k%26x%3D1") {
+	if got := c.BuyURL(); !strings.HasSuffix(got, "/p/k%26x%3D1/") {
 		t.Errorf("BuyURL() = %s", got)
 	}
 }
@@ -113,7 +113,7 @@ func TestNoMachineIDIsAnErrorForDeviceCalls(t *testing.T) {
 	if _, err := c.WaitForSeat(context.Background(), time.Millisecond); !errors.Is(err, ErrNoMachineID) {
 		t.Errorf("WaitForSeat() error = %v, want ErrNoMachineID", err)
 	}
-	if got := c.BuyURL(); !strings.HasSuffix(got, "product=k") {
+	if got := c.BuyURL(); !strings.HasSuffix(got, "/p/k/") {
 		t.Errorf("BuyURL() = %s", got)
 	}
 }

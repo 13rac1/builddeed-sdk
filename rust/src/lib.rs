@@ -90,7 +90,7 @@ impl Product {
             version: version.into(),
             network: Network::Testnet,
             rpc_url: "https://rpc.testnet.fastnear.com".into(),
-            site_url: "https://13rac1.github.io/builddeed".into(),
+            site_url: "https://builddeed.dev".into(),
         }
     }
 
@@ -334,7 +334,7 @@ impl Client {
     pub fn register_url(&self) -> Result<String, Error> {
         let p = &self.product;
         Ok(format!(
-            "{}/register.html#product={}&device={}&version={}",
+            "{}/register/#product={}&device={}&version={}",
             p.site_url,
             encode(&p.key),
             encode(self.device_id()?),
@@ -344,11 +344,7 @@ impl Client {
 
     /// The website page that sells a license.
     pub fn buy_url(&self) -> String {
-        format!(
-            "{}/buy.html?product={}",
-            self.product.site_url,
-            encode(&self.product.key)
-        )
+        format!("{}/p/{}/", self.product.site_url, encode(&self.product.key))
     }
 
     /// Opens the register page in the default browser.
@@ -1032,14 +1028,11 @@ mod tests {
         assert_eq!(
             c.register_url().unwrap(),
             format!(
-                "https://13rac1.github.io/builddeed/register.html#product=doom&device={}&version=0.2.0",
+                "https://builddeed.dev/register/#product=doom&device={}&version=0.2.0",
                 dev()
             )
         );
-        assert_eq!(
-            c.buy_url(),
-            "https://13rac1.github.io/builddeed/buy.html?product=doom"
-        );
+        assert_eq!(c.buy_url(), "https://builddeed.dev/p/doom/");
         assert_eq!(dev().len(), 64);
         assert_eq!(c.short_device_id().unwrap(), "6844b8b0...af75");
     }
@@ -1126,7 +1119,7 @@ mod tests {
         };
         assert_eq!(c.check(), Err(Error::NoMachineId));
         assert_eq!(c.register_url(), Err(Error::NoMachineId));
-        assert!(c.buy_url().ends_with("product=k"));
+        assert!(c.buy_url().ends_with("/p/k/"));
     }
 
     #[test]
