@@ -4,10 +4,10 @@
     "contract": "licenses.builddeed.testnet",
     "key": "doom",
     "version": "0.2.0",
-    "site_url": "https://builddeed.dev"
+    "site_url": "https://testnet.builddeed.dev"
   },
   "device_id": "6844b8b00000000000000000000000000000000000000000000000000000af75",
-  "register_url": "https://builddeed.dev/register/#product=doom&device=6844b8b00000000000000000000000000000000000000000000000000000af75&version=0.2.0",
-  "buy_url": "https://builddeed.dev/p/doom/",
+  "register_url": "https://testnet.builddeed.dev/register/#product=doom&device=6844b8b00000000000000000000000000000000000000000000000000000af75&version=0.2.0",
+  "buy_url": "https://testnet.builddeed.dev/p/doom/",
   "short_device_id": "6844b8b0...af75"
 }

@@ -33,11 +33,11 @@ func mustClient(p Product, deviceID string) *Client {
 
 func TestProductDefaults(t *testing.T) {
 	p := Testnet(OfficialTestnetContract, "doom", "0.2.0")
-	if p.RPCURL != "https://rpc.testnet.fastnear.com" || p.SiteURL != "https://builddeed.dev" {
+	if p.RPCURL != "https://rpc.testnet.fastnear.com" || p.SiteURL != "https://testnet.builddeed.dev" {
 		t.Errorf("Testnet() = %+v", p)
 	}
 	m := Mainnet("x.near", "doom", "0.2.0")
-	if m.RPCURL != "https://rpc.mainnet.fastnear.com" || m.SiteURL != p.SiteURL || m.Key != "doom" {
+	if m.RPCURL != "https://rpc.mainnet.fastnear.com" || m.SiteURL != "https://builddeed.dev" || m.Key != "doom" {
 		t.Errorf("Mainnet() = %+v", m)
 	}
 }

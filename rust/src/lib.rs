@@ -90,7 +90,7 @@ impl Product {
             version: version.into(),
             network: Network::Testnet,
             rpc_url: "https://rpc.testnet.fastnear.com".into(),
-            site_url: "https://builddeed.dev".into(),
+            site_url: "https://testnet.builddeed.dev".into(),
         }
     }
 
@@ -99,6 +99,7 @@ impl Product {
         Self {
             network: Network::Mainnet,
             rpc_url: "https://rpc.mainnet.fastnear.com".into(),
+            site_url: "https://builddeed.dev".into(),
             ..Self::testnet(contract, key, version)
         }
     }
@@ -837,6 +838,18 @@ fn save_checked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_network_has_its_own_website() {
+        assert_eq!(
+            Product::testnet("c", "k", "1").site_url,
+            "https://testnet.builddeed.dev"
+        );
+        assert_eq!(
+            Product::mainnet("c", "k", "1").site_url,
+            "https://builddeed.dev"
+        );
+    }
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
@@ -1028,11 +1041,11 @@ mod tests {
         assert_eq!(
             c.register_url().unwrap(),
             format!(
-                "https://builddeed.dev/register/#product=doom&device={}&version=0.2.0",
+                "https://testnet.builddeed.dev/register/#product=doom&device={}&version=0.2.0",
                 dev()
             )
         );
-        assert_eq!(c.buy_url(), "https://builddeed.dev/p/doom/");
+        assert_eq!(c.buy_url(), "https://testnet.builddeed.dev/p/doom/");
         assert_eq!(dev().len(), 64);
         assert_eq!(c.short_device_id().unwrap(), "6844b8b0...af75");
     }

@@ -10,10 +10,10 @@ The module uses the Go standard library only.
 ## Use it
 
 ```sh
-go get github.com/13rac1/builddeed-sdk/go@v0.1.1
+go get github.com/13rac1/builddeed-sdk/go@v0.1.2
 ```
 
-The tag in the repository is `go/v0.1.1`; the go command adds the `go/`
+The tag in the repository is `go/v0.1.2`; the go command adds the `go/`
 folder to the version.
 
 The package name is `builddeed`:

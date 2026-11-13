@@ -54,7 +54,8 @@ const OfficialTestnetContract = "licenses.builddeed.testnet"
 const (
 	testnetRPCURL  = "https://rpc.testnet.fastnear.com"
 	mainnetRPCURL  = "https://rpc.mainnet.fastnear.com"
-	defaultSiteURL = "https://builddeed.dev"
+	testnetSiteURL = "https://testnet.builddeed.dev"
+	mainnetSiteURL = "https://builddeed.dev"
 )
 
 // RegisterWait is how long the register page can take: the presence listener
@@ -89,7 +90,7 @@ func Testnet(contract, key, version string) Product {
 		Key:      key,
 		Version:  version,
 		RPCURL:   testnetRPCURL,
-		SiteURL:  defaultSiteURL,
+		SiteURL:  testnetSiteURL,
 	}
 }
 
@@ -98,6 +99,7 @@ func Testnet(contract, key, version string) Product {
 func Mainnet(contract, key, version string) Product {
 	p := Testnet(contract, key, version)
 	p.RPCURL = mainnetRPCURL
+	p.SiteURL = mainnetSiteURL
 	return p
 }
 

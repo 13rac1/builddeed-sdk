@@ -16,7 +16,7 @@ NFT collection. The official BuildDeed collection on testnet is
 | `key` | `doom` | The product key in the contract (`add_product`) and on the website. |
 | `version` | `0.2.0` | The version of the running program, as the release records it with `add_build`. |
 | `rpc_url` | `https://rpc.testnet.fastnear.com` | A NEAR JSON-RPC endpoint of the contract's network. |
-| `site_url` | `https://builddeed.dev` | The BuildDeed website, no trailing slash. |
+| `site_url` | `https://testnet.builddeed.dev` | The BuildDeed website of the network, no trailing slash: `https://testnet.builddeed.dev` for testnet, `https://builddeed.dev` for mainnet. |
 
 ## Computer id
 
